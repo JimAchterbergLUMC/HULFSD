@@ -1,0 +1,25 @@
+{
+    "adult": {
+        "id": 2,
+        "cat_features": [
+            "sex",
+            "workclass",
+            "education",
+            "marital-status",
+            "occupation",
+            "relationship",
+            "race",
+            "native-country"
+        ],
+        "num_features": [
+            "age",
+            "capital-gain",
+            "capital-loss",
+            "hours-per-week"
+        ],
+        "drop_features": [
+            "fnlwgt",
+            "education-num"
+        ]
+    }
+}

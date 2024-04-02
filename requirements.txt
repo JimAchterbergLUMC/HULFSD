@@ -1,0 +1,5 @@
+sdv==1.11.0
+ucimlrepo==0.0.6
+certifi==2024.2.2
+seaborn==0.13.2
+scikit-optimize==0.10.1
