@@ -1,3 +1,4 @@
 .conda/
 data/
 !data/.placeholder
+results/

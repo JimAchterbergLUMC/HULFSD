@@ -1,6 +1,25 @@
 import pandas as pd
 from sklearn.preprocessing import OneHotEncoder, Normalizer
 from sklearn.model_selection import train_test_split
+import numpy as np
+
+
+def sklearn_preprocessor(processor, data: pd.DataFrame, features: list):
+    """
+    Take a scikit learn preprocesser and use it to replace features in the dataframe with processed version.
+    """
+    # reset index of splitted data
+    data = data.copy().reset_index()
+    # get transformed data as np array
+    df = processor.fit_transform(data[features])
+    if not isinstance(df, np.ndarray):
+        df = df.toarray()
+    # get transformed data in dataframe with correct feature names
+    df = pd.DataFrame(df, columns=processor.get_feature_names_out(features))
+    # replace features with preprocessed features
+    data = data.drop(features, axis=1)
+    data = pd.concat([data, df], axis=1)
+    return data
 
 
 def preprocess(X, y, cat_features, num_features, drop_features):
@@ -12,12 +31,9 @@ def preprocess(X, y, cat_features, num_features, drop_features):
     X = X.drop(drop_features, axis=1)
 
     # one hot encode all categoricals (also binaries, is handled by encoder)
-    ohe = OneHotEncoder(drop="if_binary")
-    ohe_df = ohe.fit_transform(X[cat_features]).toarray()
-    feature_names = ohe.get_feature_names_out(cat_features)
-    ohe_df = pd.DataFrame(ohe_df, columns=feature_names)
-    X = X.drop(cat_features, axis=1)
-    X = pd.concat([X, ohe_df], axis=1)
+    X = sklearn_preprocessor(
+        processor=OneHotEncoder(drop="if_binary"), data=X, features=cat_features
+    )
 
     # setup train test split
     X_train, X_test, y_train, y_test = train_test_split(
@@ -25,9 +41,12 @@ def preprocess(X, y, cat_features, num_features, drop_features):
     )
 
     # scale numericals after splitting (to avoid information leakage)
-    norm = Normalizer(norm="l2")
-    X_train[num_features] = norm.transform(X_train[num_features])
-    X_test[num_features] = norm.transform(X_test[num_features])
+    X_train = sklearn_preprocessor(
+        processor=Normalizer(norm="l2"), data=X_train, features=num_features
+    )
+    X_test = sklearn_preprocessor(
+        processor=Normalizer(norm="l2"), data=X_test, features=num_features
+    )
 
     return X_train, X_test, y_train, y_test
 
@@ -37,11 +56,14 @@ def preprocess_adult(X, y):
     Preprocessing specific to Adult census dataset
     """
     # encode target income
-    y = y.income.replace({"<=50K": 0, "<=50K.": 0, ">50K": 1, ">50K.": 1})
+    y = y.income.copy()
+    y = y.replace({"<=50K": 0, "<=50K.": 0, ">50K": 1, ">50K.": 1})
+
     # encode native-country as: US, Mexico, Other
-    X["native-country"] = X["native-country"].mask(
-        ~X["native-country"].isin(["United-States", "Mexico"]), "Other"
+    X.loc[~X["native-country"].isin(["United-States", "Mexico"]), "native-country"] = (
+        "Other"
     )
+
     return X, y
 
 

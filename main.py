@@ -1,9 +1,10 @@
 from ucimlrepo import fetch_ucirepo
-from utils import preprocess
+from utils import preprocess, models
 import json
+import os
 
 # open configuration of datasets
-with open("config.json", "r") as f:
+with open("datasets.json", "r") as f:
     config = json.load(f)
 
 # set which dataset we are using (and assert it is one of the options)
@@ -16,12 +17,13 @@ dataset = fetch_ucirepo(id=config[ds]["id"])
 X = dataset.data.features
 y = dataset.data.targets
 
+# dataset specific preprocessing
 if ds == "adult":
     X, y = preprocess.preprocess_adult(X, y)
 else:
     pass
 
-
+# general preprocessing: one hot encoding, normalization, dropping features
 X_train, X_test, y_train, y_test = preprocess.preprocess(
     X,
     y,
@@ -30,49 +32,20 @@ X_train, X_test, y_train, y_test = preprocess.preprocess(
     drop_features=config[ds]["drop_features"],
 )
 
-from sklearn.naive_bayes import GaussianNB  # issues with hyperparameter tuning
-from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import GradientBoostingClassifier
-from skopt import BayesSearchCV
+# get the different models and corresponding parameter search spaces for Bayesian hyperparameter tuning
+models_, param_search_spaces = models.get_models_()
 
-models = [GaussianNB(), LogisticRegression(solver="saga"), GradientBoostingClassifier()]
-param_spaces = [
-    {"var_smoothing": (1e-9, 1e-6)},  # NB
-    {"penalty": ["l2", "l1"], "C": (1e-6, 1e6)},  # LR
-    {
-        "learning_rate": (1e-6, 1e-1),
-        "n_estimators": (1e0, 1e5),
-        "max_depth": (1e0, 1e2),
-    },  # GB
-]
+# setup result directory
+result_path = "results"
+if not os.path.exists(result_path):
+    os.makedirs(result_path)
 
-for model, param_space in zip(models, param_spaces):
-    opt = BayesSearchCV(
-        model,
-        param_space,
-        n_iter=32,
-        cv=3,
-        scoring="roc_auc",
-        random_state=0,
-    )
-    opt.fit(X_train, y_train)
-    print(f"Best test score: {opt.score(X_test,y_test)}")
-    print(f"Using model: {opt.best_estimator_} \n")
-
-
-# models = [
-#     GaussianNB(),
-#     LogisticRegression(penalty="l1", C=0.5, solver="saga"),
-#     GradientBoostingClassifier(learning_rate=0.1, n_estimators=200, max_depth=3),
-# ]
-# for model in models:
-#     model.fit(X_train, y_train)
-#     preds = model.predict(X_test)
-#     auc = roc_auc_score(y_test, preds)
-#     print(f"Model: {model} achieves AUC: {auc}")
-
-
-# classifiers to use:
-# LASSO logistic regression
-# gradient boosting
-# and possibly a lot more...
+with open(os.path.join(result_path, "results.txt"), "w") as file:
+    # loop over different possible models and parameter search spaces
+    for model, param_space in zip(models_, param_search_spaces):
+        best_model, test_score = models.get_best_model_(
+            X_train, X_test, y_train, y_test, model, param_space
+        )
+        print(best_model)
+        print(test_score)
+        file.write(f"Model: {best_model} Best test score: {test_score} \n")
