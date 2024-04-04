@@ -9,7 +9,7 @@ def sklearn_preprocessor(processor, data: pd.DataFrame, features: list):
     Take a scikit learn preprocesser and use it to replace features in the dataframe with processed version.
     """
     # reset index of splitted data
-    data = data.copy().reset_index()
+    data = data.copy().reset_index(drop=True)
     # get transformed data as np array
     df = processor.fit_transform(data[features])
     if not isinstance(df, np.ndarray):
@@ -22,14 +22,10 @@ def sklearn_preprocessor(processor, data: pd.DataFrame, features: list):
     return data
 
 
-def preprocess(X, y, cat_features, num_features, drop_features):
+def preprocess(X, y, cat_features, num_features):
     """
     Preprocesses predictors and targets to train and test sets ready for validation. Performs one hot encoding on categoricals and normalization for numericals.
     """
-
-    # drop unnecessary features
-    X = X.drop(drop_features, axis=1)
-
     # one hot encode all categoricals (also binaries, is handled by encoder)
     X = sklearn_preprocessor(
         processor=OneHotEncoder(drop="if_binary"), data=X, features=cat_features
@@ -65,6 +61,13 @@ def preprocess_adult(X, y):
     )
 
     return X, y
+
+
+def split_embedding_set(X, y):
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, stratify=y, test_size=0.3, random_state=0
+    )
+    return X_train, X_test, y_train, y_test
 
 
 # TBD:
