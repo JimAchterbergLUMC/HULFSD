@@ -76,6 +76,8 @@ def encoder_network(
 
 
 def flip_encoder(encoder):
+    # next step: check whether it really inverts it. also, code can probably be simplified...
+
     encoder_output_shape = encoder.output_shape
     flipped_encoder_input = layers.Input(encoder_output_shape)
     x = flipped_encoder_input
