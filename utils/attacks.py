@@ -1,10 +1,15 @@
-def rev_engineer_projections(unknown_projections, leaked_projections, leaked_X):
+import keras
+from keras import layers
+
+
+def rev_engineer_projections(projections, real, leak_percentage, activation="relu"):
     """
-    Function to reverse engineer projections back to
+    Function to reverse engineer projections back to original data space.
+    Basically that's just taking projections as X, splitting into train/test set by certain percentage (= leaked percentage).
+    Here y equals leaked real data.
     """
 
-    X = None
-    return X
+    return None
 
 
 def attribute_inference():

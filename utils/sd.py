@@ -10,7 +10,7 @@ def generate(
     sample_size: int,
     model: str = "copula",
     model_args: dict = {},
-    embedded: bool = False,
+    projected: bool = False,
 ):
     X = X.reset_index(drop=True)
     y = y.reset_index(drop=True)
@@ -19,7 +19,7 @@ def generate(
     metadata = SingleTableMetadata()
     metadata.detect_from_dataframe(df)
     # for embedded features, all non target features should be detected as numerical
-    if embedded:
+    if projected:
         metadata.remove_primary_key()
         for feature in X.columns:
             metadata.update_column(column_name=feature, sdtype="numerical")

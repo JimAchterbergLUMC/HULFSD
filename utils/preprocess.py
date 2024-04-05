@@ -3,7 +3,7 @@ from sklearn.preprocessing import OneHotEncoder, Normalizer
 from sklearn.model_selection import train_test_split
 import numpy as np
 
-# this sets the random state to be similar across train test splits, so we get the same indicess
+# this sets the random state to be similar across train test splits, so we get the same indices
 random_state = 999
 
 
@@ -67,7 +67,7 @@ def preprocess_adult(X: pd.DataFrame, y: pd.Series):
 
 
 def traintest_split(X, y):
-    # setup train test split
+    # setup train test split with same random state across splits
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, stratify=y, test_size=0.3, random_state=random_state
     )

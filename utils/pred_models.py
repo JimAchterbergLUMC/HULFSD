@@ -16,7 +16,7 @@ def get_models_():
 
     param_search_spaces = [
         # {"var_smoothing": [1e-9, 1e-6]},  # NB
-        {"penalty": ["l2", "l1"], "C": (1e-6, 1e6)},  # LR
+        {"penalty": ["l2", "l1"], "C": (1e-3, 1e6)},  # LR
         # {
         #     "kernel": [
         #         "linear",
