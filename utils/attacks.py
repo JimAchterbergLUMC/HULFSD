@@ -1,6 +1,10 @@
-def infer_embeddings():
-    # function to reverse-engineer embeddings back to original feature space using some leaked real data
-    pass
+def rev_engineer_projections(unknown_projections, leaked_projections, leaked_X):
+    """
+    Function to reverse engineer projections back to
+    """
+
+    X = None
+    return X
 
 
 def attribute_inference():

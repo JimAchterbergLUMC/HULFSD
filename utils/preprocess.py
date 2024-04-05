@@ -3,8 +3,11 @@ from sklearn.preprocessing import OneHotEncoder, Normalizer
 from sklearn.model_selection import train_test_split
 import numpy as np
 
+# this sets the random state to be similar across train test splits, so we get the same indicess
+random_state = 999
 
-def sklearn_preprocessor(processor, data: pd.DataFrame, features: list):
+
+def sklearn_preprocessor(processor: any, data: pd.DataFrame, features: list):
     """
     Take a scikit learn preprocesser and use it to replace features in the dataframe with processed version.
     """
@@ -22,9 +25,9 @@ def sklearn_preprocessor(processor, data: pd.DataFrame, features: list):
     return data
 
 
-def preprocess(X, y, cat_features, num_features):
+def preprocess(X: pd.DataFrame, y: pd.Series, cat_features: list, num_features: list):
     """
-    Preprocesses predictors and targets to train and test sets ready for validation. Performs one hot encoding on categoricals and normalization for numericals.
+    Preprocesses predictors and targets to train and test sets ready for validation. Performs one hot encoding on categoricals and normalization for numericals independently in train and test sets.
     """
     # one hot encode all categoricals (also binaries, is handled by encoder)
     X = sklearn_preprocessor(
@@ -33,7 +36,7 @@ def preprocess(X, y, cat_features, num_features):
 
     # setup train test split
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, stratify=y, test_size=0.3, random_state=0
+        X, y, stratify=y, test_size=0.3, random_state=random_state
     )
 
     # scale numericals after splitting (to avoid information leakage)
@@ -47,7 +50,7 @@ def preprocess(X, y, cat_features, num_features):
     return X_train, X_test, y_train, y_test
 
 
-def preprocess_adult(X, y):
+def preprocess_adult(X: pd.DataFrame, y: pd.Series):
     """
     Preprocessing specific to Adult census dataset
     """
@@ -63,9 +66,10 @@ def preprocess_adult(X, y):
     return X, y
 
 
-def split_embedding_set(X, y):
+def traintest_split(X, y):
+    # setup train test split
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, stratify=y, test_size=0.3, random_state=0
+        X, y, stratify=y, test_size=0.3, random_state=random_state
     )
     return X_train, X_test, y_train, y_test
 

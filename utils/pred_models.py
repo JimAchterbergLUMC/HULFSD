@@ -3,6 +3,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.svm import SVC
 from skopt import BayesSearchCV
+import pandas as pd
 
 
 def get_models_():
@@ -35,7 +36,14 @@ def get_models_():
     return models, param_search_spaces
 
 
-def get_best_model_(X_train, X_test, y_train, y_test, model, param_space):
+def get_best_model_(
+    X_train: pd.DataFrame,
+    X_test: pd.DataFrame,
+    y_train: pd.Series,
+    y_test: pd.Series,
+    model: any,
+    param_space: dict,
+):
     opt = BayesSearchCV(
         model,
         param_space,

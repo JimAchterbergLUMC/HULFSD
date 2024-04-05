@@ -21,5 +21,23 @@
             "fnlwgt",
             "education-num"
         ]
+    },
+    "bank": {
+        "id": 222,
+        "cat_features": [],
+        "num_features": [],
+        "drop_features": []
+    },
+    "credit": {
+        "id": 350,
+        "cat_features": [],
+        "num_features": [],
+        "drop_features": []
+    },
+    "shopping": {
+        "id": 468,
+        "cat_features": [],
+        "num_features": [],
+        "drop_features": []
     }
 }
