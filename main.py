@@ -57,7 +57,7 @@ encoder, _, _ = project.encoder_network(
     X_train,
     y_train,
     latent_size=X_train.shape[1],
-    model_args={"batch_size": 128, "epochs": 1},
+    model_args={"batch_size": 128, "epochs": 5},
 )
 # project data through the encoder
 emb_X_train = pd.DataFrame(
@@ -83,12 +83,14 @@ data["projected_real"] = [emb_X_train, emb_X_test, y_train, y_test]
 
 # pass projections through flipped encoder
 flipped_encoder = project.flip_encoder(encoder)
-print(encoder.summary())
-print(flipped_encoder.summary())
-exit()
+
 # check the reconstruction
 test_rec = flipped_encoder.predict(encoder.predict(X_train))
-print(X_train - test_rec)
+import numpy as np
+
+print(np.round(X_train, 3))
+print(pd.DataFrame(np.round(test_rec, 3), columns=X_train.columns))
+exit()
 
 dec_X_train = flipped_encoder.predict(emb_X_train)
 dec_X_test = flipped_encoder.predict(emb_X_test)
