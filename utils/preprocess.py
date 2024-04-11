@@ -50,6 +50,21 @@ def preprocess(X: pd.DataFrame, y: pd.Series, cat_features: list, num_features: 
     return X_train, X_test, y_train, y_test
 
 
+def infer_data_type(series: pd.Series):
+    """
+    Infers data type of a pandas series.
+    """
+    if len(series.unique()) == 2:
+        return "binary"
+    elif len(series.unique()) > 2:
+        return "multiclass"
+    else:
+        if pd.api.types.is_numeric_dtype(series):
+            return "continuous"
+        else:
+            return "unknown"
+
+
 def preprocess_adult(X: pd.DataFrame, y: pd.Series):
     """
     Preprocessing specific to Adult census dataset

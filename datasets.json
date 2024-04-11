@@ -20,6 +20,11 @@
         "drop_features": [
             "fnlwgt",
             "education-num"
+        ],
+        "sensitive_fields": [
+            "age",
+            "sex",
+            "race"
         ]
     },
     "bank": {
