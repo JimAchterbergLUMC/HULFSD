@@ -50,7 +50,8 @@ def get_column_plots(
                 data=full_df, x=col, hue="dataset", stat="proportion", ax=axs[i]
             )
         # Remove individual legends from subplots
-        axs[i].get_legend().remove()
+        if i > 0:
+            axs[i].get_legend().remove()
 
     # Extract legend from one subplot and place it outside the subplots
     handles, labels = axs[0].get_legend_handles_labels()
