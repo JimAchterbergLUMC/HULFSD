@@ -2,6 +2,7 @@ from matplotlib import pyplot as plt
 import seaborn as sns
 from utils import preprocess
 import pandas as pd
+import numpy as np
 
 
 def get_column_plots(
@@ -27,28 +28,32 @@ def get_column_plots(
 
     print("starting subplot generation")
 
-    # instantiate a subplot figure with correct size
-    fig, axs = plt.subplots(nrows=len(real_data.columns), ncols=1, figsize=(10, 8))
+    # concatenate dataframes with a hue column for easy plotting in same figure
+    full_df = pd.concat(
+        [
+            real_data.assign(dataset="Real"),
+            regular_synthetic.assign(dataset="Regular Synthetic"),
+            decoded_synthetic.assign(dataset="Decoded Synthetic"),
+        ]
+    )
+
+    fig, axs = plt.subplots(nrows=len(real_data.columns), ncols=1, figsize=(8, 16))
+
     for i, col in enumerate(real_data.columns):
-        print(f"plotting feature: {col}")
-        for j, (name, df) in enumerate(
-            zip(
-                ["Real", "Regular Synthetic", "Decoded Synthetic"],
-                [real_data, regular_synthetic, decoded_synthetic],
+        print(f"currently plotting column {col}")
+
+        dt = preprocess.infer_data_type(full_df[col])
+        if dt == "continuous":
+            sns.histplot(data=full_df, x=col, hue="dataset", alpha=0.5, ax=axs[i])
+        else:
+            sns.countplot(
+                data=full_df, x=col, hue="dataset", stat="proportion", ax=axs[i]
             )
-        ):
-            dt = preprocess.infer_data_type(real_data[col])
-            if dt == "continuous":
-                sns.histplot(
-                    df[col], ax=axs[i], color=f"C{j}", alpha=0.5, kde=True, label=name
-                )
-            else:
-                sns.barplot(
-                    x=col, y=df.index, data=df, ax=axs[i], color=f"C{j}", label=name
-                )
-            axs[i].set_title(col, fontsize=11)
-    # fig.suptitle(fontsize=11)
-    plt.legend(fontsize=11)
-    plt.tight_layout()
+        # Remove individual legends from subplots
+        axs[i].get_legend().remove()
+
+    # Extract legend from one subplot and place it outside the subplots
+    handles, labels = axs[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="upper right")
 
     return plt

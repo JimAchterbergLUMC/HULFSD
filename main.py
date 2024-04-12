@@ -105,6 +105,7 @@ with open(os.path.join(result_path, "results.txt"), "w") as file:
         categorical_features=config[ds]["cat_features"],
     )
     plots.savefig(os.path.join(result_path, "fidelity.png"))
+    plots.show()
     exit()
 
     # loop over the different datasets for which we want to get results
