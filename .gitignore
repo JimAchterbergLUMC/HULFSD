@@ -1,5 +1,4 @@
 .conda/
 data/
-!data/.placeholder
 results/
 models/

@@ -3,6 +3,8 @@ from sklearn.preprocessing import OneHotEncoder, Normalizer
 from sklearn.model_selection import train_test_split
 import numpy as np
 
+# includes scripts for general and dataset specific preprocessing
+
 # this sets the random state to be similar across train test splits, so we get the same indices
 random_state = 999
 
@@ -54,15 +56,44 @@ def infer_data_type(series: pd.Series):
     """
     Infers data type of a pandas series.
     """
+    # if only two values, it is binary
     if len(series.unique()) == 2:
         return "binary"
-    elif len(series.unique()) > 2:
+    # if more than two values and not floats, it is multiclass
+    elif (len(series.unique()) > 2) and not (pd.api.types.is_float_dtype(series.dtype)):
         return "multiclass"
     else:
+        # else it is continuous (if it is numeric at least)
         if pd.api.types.is_numeric_dtype(series):
             return "continuous"
         else:
             return "unknown"
+
+
+def decoding_onehot(df: pd.DataFrame, categorical_features: list):
+    """
+    Decode onehot features if the onehot feature names start with the original feature names, provided in the list
+    """
+
+    # ensure we are not changing the original dataframe
+    df = df.copy()
+
+    # store list of preprocessed names per categorical feature in a dictionary
+    c = {}
+    for cat in categorical_features:
+        c_ = []
+        for column in df.columns:
+            if column[: len(cat)] == cat:
+                c_.append(column)
+            c[cat] = c_
+
+    # remove one hot features and replace with decoded features
+    for cat, names in c.items():
+        new = pd.DataFrame(df[names].idxmax(axis=1), columns=[cat])
+        df = df.drop(names, axis=1)
+        df = pd.concat([df, new], axis=1)
+
+    return df
 
 
 def preprocess_adult(X: pd.DataFrame, y: pd.Series):
@@ -81,7 +112,7 @@ def preprocess_adult(X: pd.DataFrame, y: pd.Series):
     return X, y
 
 
-def traintest_split(X, y):
+def traintest_split(X: pd.DataFrame, y: pd.Series):
     # setup train test split with same random state across splits
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, stratify=y, test_size=0.3, random_state=random_state

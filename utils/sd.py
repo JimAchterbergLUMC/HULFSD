@@ -8,6 +8,8 @@ from keras import layers
 import os
 import numpy as np
 
+# includes scripts for generating synthetic data (regular or projections)
+
 
 def generate(
     X: pd.DataFrame,
@@ -90,7 +92,7 @@ def encoder_network(
     return encoder, predictor, network
 
 
-def flip_encoder(encoder):
+def flip_encoder(encoder: any):
     _, latent_size = encoder.output.shape
     flipped_encoder_input = layers.Input((latent_size,))
     flipped_encoder_output = layers.Dense(latent_size, activation=None)(

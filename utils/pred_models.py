@@ -5,6 +5,8 @@ from sklearn.svm import SVC
 from skopt import BayesSearchCV
 import pandas as pd
 
+# includes scripts for retrieving models with corresponding parameter spaces
+
 
 def get_binary_models_():
     models = [
@@ -46,7 +48,7 @@ def get_multiclass_models_():
 
 def get_regression_models_():
 
-    models = [Lasso(max_iter=None)]
+    models = [Lasso(max_iter=1000)]
     param_search_spaces = [{"alpha": (1e-3, 1e6)}]
 
     return models, param_search_spaces
@@ -60,16 +62,16 @@ def get_best_model_(
     model: any,
     param_space: dict,
     scoring: str,
+    cv: int = 3,
 ):
-    cv = 3
     opt = BayesSearchCV(
         model,
         param_space,
-        n_iter=32,
+        n_iter=3,
         cv=cv,
         scoring=scoring,
         random_state=0,
-        verbose=10,
+        verbose=0,
         n_jobs=cv,
         iid=False,
     )
