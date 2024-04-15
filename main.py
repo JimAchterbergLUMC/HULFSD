@@ -3,7 +3,7 @@ from utils import fidelity, preprocess, sd, inference
 import json
 import os
 import pandas as pd
-
+from matplotlib import pyplot as plt
 
 # open configuration of datasets
 with open("datasets.json", "r") as f:
@@ -18,6 +18,7 @@ dataset = fetch_ucirepo(id=config[ds]["id"])
 # load features and target
 X = dataset.data.features
 y = dataset.data.targets
+
 
 # dataset specific preprocessing
 if ds == "adult":
@@ -35,22 +36,33 @@ X = X.drop(config[ds]["drop_features"], axis=1)
 X_train, _, y_train, _ = preprocess.traintest_split(X, y)
 syn_X, syn_y = sd.generate(X_train, y_train, sample_size=X.shape[0], model="copula")
 
+
 # general preprocessing: one hot encoding, normalization
-X_train, X_test, y_train, y_test = preprocess.preprocess(
-    X,
-    y,
-    cat_features=config[ds]["cat_features"],
-    num_features=config[ds]["num_features"],
+X_train, X_test, y_train, y_test, fitted_norm_train, fitted_norm_test = (
+    preprocess.preprocess(
+        X,
+        y,
+        cat_features=config[ds]["cat_features"],
+        num_features=config[ds]["num_features"],
+    )
 )
 data["real"] = [X_train, X_test, y_train, y_test]
 
-syn_X_train, syn_X_test, syn_y_train, syn_y_test = preprocess.preprocess(
+(
+    syn_X_train,
+    syn_X_test,
+    syn_y_train,
+    syn_y_test,
+    fitted_norm_syn_train,
+    fitted_norm_syn_test,
+) = preprocess.preprocess(
     syn_X,
     syn_y,
     cat_features=config[ds]["cat_features"],
     num_features=config[ds]["num_features"],
 )
 data["synthetic"] = [syn_X_train, X_test, syn_y_train, y_test]
+
 
 # train the encoder network
 encoder, _, _ = sd.encoder_network(
@@ -98,11 +110,18 @@ if not os.path.exists(result_path):
 with open(os.path.join(result_path, "results.txt"), "w") as file:
     # check fidelity of regular synthetic and decoded synthetic projections (perhaps also add income as feature)
     print("generating plots")
+
+    # creates plots of real and synthetic data in original feature space
+    # but since projections are arbitrarily scaled, the location of decoded projections is arbitrarily different
+    # so instead of reverse scaling data, we might have to also normalize decoded projections to [0,1] for comparison of the distribution shape
     plots = fidelity.get_column_plots(
-        data["real"][0],
-        data["synthetic"][0],
-        data["decoded_synthetic"][0],
-        categorical_features=config[ds]["cat_features"],
+        real_data=data["real"][0],
+        regular_synthetic=data["synthetic"][0],
+        decoded_synthetic=data["decoded_synthetic"][0],
+        cat_features=config[ds]["cat_features"],
+        num_features=config[ds]["num_features"],
+        real_normalizer=fitted_norm_train,
+        syn_normalizer=fitted_norm_syn_train,
     )
     plots.savefig(os.path.join(result_path, "fidelity.png"))
     plots.show()

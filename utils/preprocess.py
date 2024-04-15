@@ -1,5 +1,5 @@
 import pandas as pd
-from sklearn.preprocessing import OneHotEncoder, Normalizer
+from sklearn.preprocessing import OneHotEncoder, MinMaxScaler
 from sklearn.model_selection import train_test_split
 import numpy as np
 
@@ -16,15 +16,17 @@ def sklearn_preprocessor(processor: any, data: pd.DataFrame, features: list):
     # reset index of splitted data
     data = data.copy().reset_index(drop=True)
     # get transformed data as np array
-    df = processor.fit_transform(data[features])
+    fitted_processor = processor.fit(data[features])
+
+    df = fitted_processor.transform(data[features])
     if not isinstance(df, np.ndarray):
         df = df.toarray()
     # get transformed data in dataframe with correct feature names
-    df = pd.DataFrame(df, columns=processor.get_feature_names_out(features))
+    df = pd.DataFrame(df, columns=fitted_processor.get_feature_names_out(features))
     # replace features with preprocessed features
     data = data.drop(features, axis=1)
     data = pd.concat([data, df], axis=1)
-    return data
+    return data, fitted_processor
 
 
 def preprocess(X: pd.DataFrame, y: pd.Series, cat_features: list, num_features: list):
@@ -32,7 +34,7 @@ def preprocess(X: pd.DataFrame, y: pd.Series, cat_features: list, num_features: 
     Preprocesses predictors and targets to train and test sets ready for validation. Performs one hot encoding on categoricals and normalization for numericals independently in train and test sets.
     """
     # one hot encode all categoricals (also binaries, is handled by encoder)
-    X = sklearn_preprocessor(
+    X, _ = sklearn_preprocessor(
         processor=OneHotEncoder(drop="if_binary"), data=X, features=cat_features
     )
 
@@ -42,14 +44,28 @@ def preprocess(X: pd.DataFrame, y: pd.Series, cat_features: list, num_features: 
     )
 
     # scale numericals after splitting (to avoid information leakage)
-    X_train = sklearn_preprocessor(
-        processor=Normalizer(norm="l2"), data=X_train, features=num_features
+    X_train, fitted_norm_train = sklearn_preprocessor(
+        processor=MinMaxScaler((0, 1)), data=X_train, features=num_features
     )
-    X_test = sklearn_preprocessor(
-        processor=Normalizer(norm="l2"), data=X_test, features=num_features
+    X_test, fitted_norm_test = sklearn_preprocessor(
+        processor=MinMaxScaler((0, 1)), data=X_test, features=num_features
     )
 
-    return X_train, X_test, y_train, y_test
+    return (
+        X_train,
+        X_test,
+        y_train,
+        y_test,
+        fitted_norm_train,
+        fitted_norm_test,
+    )
+
+
+def reverse_norm(data: pd.DataFrame, fitted_normalizer: any, num_features: list):
+    # ensure we are working on a copy
+    data = data.copy()
+    data[num_features] = fitted_normalizer.inverse_transform(data[num_features])
+    return data
 
 
 def infer_data_type(series: pd.Series):
