@@ -34,17 +34,15 @@ X = X.drop(config[ds]["drop_features"], axis=1)
 
 # generate regular synthetic dataset (based on training set from same indices as later)
 X_train, _, y_train, _ = preprocess.traintest_split(X, y)
-syn_X, syn_y = sd.generate(X_train, y_train, sample_size=X.shape[0], model="copula")
+syn_X, syn_y = sd.generate(X_train, y_train, sample_size=X.shape[0], model="vae")
 
 
 # general preprocessing: one hot encoding, normalization
-X_train, X_test, y_train, y_test, fitted_norm_train, fitted_norm_test = (
-    preprocess.preprocess(
-        X,
-        y,
-        cat_features=config[ds]["cat_features"],
-        num_features=config[ds]["num_features"],
-    )
+X_train, X_test, y_train, y_test = preprocess.preprocess(
+    X,
+    y,
+    cat_features=config[ds]["cat_features"],
+    num_features=config[ds]["num_features"],
 )
 data["real"] = [X_train, X_test, y_train, y_test]
 
@@ -53,8 +51,6 @@ data["real"] = [X_train, X_test, y_train, y_test]
     syn_X_test,
     syn_y_train,
     syn_y_test,
-    fitted_norm_syn_train,
-    fitted_norm_syn_test,
 ) = preprocess.preprocess(
     syn_X,
     syn_y,
@@ -66,21 +62,23 @@ data["synthetic"] = [syn_X_train, X_test, syn_y_train, y_test]
 
 # train the encoder network
 encoder, _, _ = sd.encoder_network(
-    X_train,
-    y_train,
-    latent_size=X_train.shape[1],
+    X=X_train,
+    y=y_train,
+    latent_size=len(X_train.columns),
     model_args={"batch_size": 128, "epochs": 100},
 )
 # project data through the encoder
+
 emb_X_train = pd.DataFrame(
     encoder.predict(X_train),
-    columns=["column_" + str(x) for x in list(range(X_train.shape[1]))],
+    columns=["column_" + str(x) for x in list(range(len(X_train.columns)))],
 )
-# note that the test data was not seen during encoder training
 emb_X_test = pd.DataFrame(
     encoder.predict(X_test),
-    columns=emb_X_train.columns,
+    columns=["column_" + str(x) for x in list(range(len(X_test.columns)))],
 )
+
+# note that the test data was not seen during encoder training
 data["projected_real"] = [emb_X_train, emb_X_test, y_train, y_test]
 
 # create synthetic projections
@@ -93,11 +91,28 @@ syn_emb_X_train, syn_emb_X_test, syn_emb_y_train, syn_emb_y_test = (
 )
 data["projected_synthetic"] = [syn_emb_X_train, emb_X_test, syn_emb_y_train, y_test]
 
+# visualize projections to check if they are accurate
+tsne_plot = fidelity.tsne_projections(emb_X_train, syn_emb_X_train)
+tsne_plot.savefig(os.path.join("results", "adult", "tsne.png"))
+tsne_plot.show()
+exit()
+
 # pass projections through flipped encoder
 flipped_encoder = sd.flip_encoder(encoder)
 syn_dec_X_train = pd.DataFrame(
     flipped_encoder.predict(syn_emb_X_train), columns=X_train.columns
 )
+
+
+# ensure data types are correct
+syn_dec_X_train = preprocess.decode_projection_datatypes(
+    projections=syn_dec_X_train,
+    num_features=config[ds]["num_features"],
+    cat_features=config[ds]["cat_features"],
+)
+
+print(syn_dec_X_train.iloc[0, :].to_list())
+
 data["decoded_synthetic"] = [syn_dec_X_train, X_test, syn_emb_y_train, y_test]
 
 
@@ -111,21 +126,19 @@ with open(os.path.join(result_path, "results.txt"), "w") as file:
     # check fidelity of regular synthetic and decoded synthetic projections (perhaps also add income as feature)
     print("generating plots")
 
-    # creates plots of real and synthetic data in original feature space
-    # but since projections are arbitrarily scaled, the location of decoded projections is arbitrarily different
-    # so instead of reverse scaling data, we might have to also normalize decoded projections to [0,1] for comparison of the distribution shape
     plots = fidelity.get_column_plots(
         real_data=data["real"][0],
         regular_synthetic=data["synthetic"][0],
-        decoded_synthetic=data["decoded_synthetic"][0],
+        decoded_synthetic=preprocess.sklearn_preprocessor(
+            "normalize",
+            data=data["decoded_synthetic"][0],
+            features=config[ds]["num_features"],
+        ),
         cat_features=config[ds]["cat_features"],
         num_features=config[ds]["num_features"],
-        real_normalizer=fitted_norm_train,
-        syn_normalizer=fitted_norm_syn_train,
     )
+
     plots.savefig(os.path.join(result_path, "fidelity.png"))
-    plots.show()
-    exit()
 
     # loop over the different datasets for which we want to get results
     for name, (X_tr, X_te, y_tr, y_te) in data.items():
@@ -179,3 +192,4 @@ with open(os.path.join(result_path, "results.txt"), "w") as file:
 
         # end of current data loop
         file.write("\n \n")
+        file.flush()

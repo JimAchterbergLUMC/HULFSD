@@ -1,5 +1,5 @@
 import pandas as pd
-from sklearn.preprocessing import OneHotEncoder, MinMaxScaler
+from sklearn.preprocessing import OneHotEncoder, MinMaxScaler, StandardScaler
 from sklearn.model_selection import train_test_split
 import numpy as np
 
@@ -9,10 +9,16 @@ import numpy as np
 random_state = 999
 
 
-def sklearn_preprocessor(processor: any, data: pd.DataFrame, features: list):
+def sklearn_preprocessor(processor: str, data: pd.DataFrame, features: list):
     """
     Take a scikit learn preprocesser and use it to replace features in the dataframe with processed version.
     """
+    assert processor in ["one-hot", "normalize"]
+    if processor == "one-hot":
+        processor = OneHotEncoder(drop="if_binary")
+    elif processor == "normalize":
+        processor = MinMaxScaler((0, 1))
+
     # reset index of splitted data
     data = data.copy().reset_index(drop=True)
     # get transformed data as np array
@@ -26,7 +32,7 @@ def sklearn_preprocessor(processor: any, data: pd.DataFrame, features: list):
     # replace features with preprocessed features
     data = data.drop(features, axis=1)
     data = pd.concat([data, df], axis=1)
-    return data, fitted_processor
+    return data
 
 
 def preprocess(X: pd.DataFrame, y: pd.Series, cat_features: list, num_features: list):
@@ -34,9 +40,7 @@ def preprocess(X: pd.DataFrame, y: pd.Series, cat_features: list, num_features: 
     Preprocesses predictors and targets to train and test sets ready for validation. Performs one hot encoding on categoricals and normalization for numericals independently in train and test sets.
     """
     # one hot encode all categoricals (also binaries, is handled by encoder)
-    X, _ = sklearn_preprocessor(
-        processor=OneHotEncoder(drop="if_binary"), data=X, features=cat_features
-    )
+    X = sklearn_preprocessor(processor="one-hot", data=X, features=cat_features)
 
     # setup train test split
     X_train, X_test, y_train, y_test = train_test_split(
@@ -44,11 +48,11 @@ def preprocess(X: pd.DataFrame, y: pd.Series, cat_features: list, num_features: 
     )
 
     # scale numericals after splitting (to avoid information leakage)
-    X_train, fitted_norm_train = sklearn_preprocessor(
-        processor=MinMaxScaler((0, 1)), data=X_train, features=num_features
+    X_train = sklearn_preprocessor(
+        processor="normalize", data=X_train, features=num_features
     )
-    X_test, fitted_norm_test = sklearn_preprocessor(
-        processor=MinMaxScaler((0, 1)), data=X_test, features=num_features
+    X_test = sklearn_preprocessor(
+        processor="normalize", data=X_test, features=num_features
     )
 
     return (
@@ -56,16 +60,7 @@ def preprocess(X: pd.DataFrame, y: pd.Series, cat_features: list, num_features: 
         X_test,
         y_train,
         y_test,
-        fitted_norm_train,
-        fitted_norm_test,
     )
-
-
-def reverse_norm(data: pd.DataFrame, fitted_normalizer: any, num_features: list):
-    # ensure we are working on a copy
-    data = data.copy()
-    data[num_features] = fitted_normalizer.inverse_transform(data[num_features])
-    return data
 
 
 def infer_data_type(series: pd.Series):
@@ -110,6 +105,46 @@ def decoding_onehot(df: pd.DataFrame, categorical_features: list):
         df = pd.concat([df, new], axis=1)
 
     return df
+
+
+def decode_projection_datatypes(projections, num_features, cat_features):
+    """
+    Use some threshold (i.e. 0.5) to round, while ensuring multiclass features only get 1 feature instance.
+    """
+    # [0,1] scale all data, then use a threshold for categoricals
+    projections = sklearn_preprocessor(
+        processor="normalize",
+        data=projections,
+        features=projections.columns,
+    )
+
+    # store list of preprocessed names per categorical feature in a dictionary
+    c = {}
+    for cat in cat_features:
+        c_ = []
+        for column in projections.columns:
+            if column[: len(cat)] == cat:
+                c_.append(column)
+            c[cat] = c_
+
+    for cat, names in c.items():
+        print(f"decoding for category {cat}")
+        if len(names) > 1:
+            # for multiclass categories, set the maximum value to the category instance
+            # get list of max probability per row for this category
+
+            projections[names] = pd.DataFrame(
+                np.eye(len(names))[np.argmax(projections[names].values, axis=1)],
+                columns=names,
+            )
+
+        else:
+            # for binaries we simply round
+            projections[names] = projections[names].round(0)
+
+        projections[names] = projections[names].astype(int)
+
+    return projections
 
 
 def preprocess_adult(X: pd.DataFrame, y: pd.Series):

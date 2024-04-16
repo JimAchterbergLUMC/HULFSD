@@ -21,7 +21,7 @@ def utility(
         scoring = "roc_auc"
     elif dt == "multiclass":
         models, param_search_spaces = pred_models.get_multiclass_models_()
-        scoring = "f1_micro"
+        scoring = "accuracy"
     elif dt == "continuous":
         models, param_search_spaces = pred_models.get_regression_models_()
         scoring = "neg_mean_squared_error"
@@ -30,9 +30,6 @@ def utility(
 
     # for the different types of models, find the best hyperparameters and return score on a test set
     for model, param_space in zip(models, param_search_spaces):
-
-        print(y_train)
-        print(model)
 
         best_model, best_score = pred_models.get_best_model_(
             X_train=X_train,
