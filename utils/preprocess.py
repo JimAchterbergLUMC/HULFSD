@@ -9,6 +9,35 @@ import numpy as np
 random_state = 999
 
 
+def reshuffle(ori_X, prepr_X):
+    """
+    Reshuffle a preprocessed dataset according to the original dataframe column order.
+    Only works if column names of preprocessed columns start with the full original column name.
+    """
+    reindex_cols = []
+    for col in ori_X:
+        # in a list store all column names starting with col
+        for col_ in prepr_X:
+            if col_.startswith(col):
+                reindex_cols.append(col_)
+    prepr_X = prepr_X[reindex_cols]
+    return prepr_X
+
+
+def get_num_classes_(ori_X):
+    classes = []
+    for col in ori_X.columns:
+        dt = infer_data_type(ori_X[col])
+        if dt == "multiclass":
+            n_class = ori_X[col].nunique(dropna=False)
+        elif dt == "binary":
+            n_class = 2
+        elif dt == "continuous":
+            n_class = 1
+        classes.append(n_class)
+    return classes
+
+
 def sklearn_preprocessor(processor: str, data: pd.DataFrame, features: list):
     """
     Take a scikit learn preprocesser and use it to replace features in the dataframe with processed version.
@@ -107,22 +136,24 @@ def decoding_onehot(df: pd.DataFrame, categorical_features: list):
     return df
 
 
-def decode_projection_datatypes(projections, num_features, cat_features):
+def decode_datatypes(data, cat_features):
     """
     Use some threshold (i.e. 0.5) to round, while ensuring multiclass features only get 1 feature instance.
     """
     # [0,1] scale all data, then use a threshold for categoricals
-    projections = sklearn_preprocessor(
-        processor="normalize",
-        data=projections,
-        features=projections.columns,
-    )
+    # projections = sklearn_preprocessor(
+    #     processor="normalize",
+    #     data=projections,
+    #     features=projections.columns,
+    # )
+
+    data = data.copy()
 
     # store list of preprocessed names per categorical feature in a dictionary
     c = {}
     for cat in cat_features:
         c_ = []
-        for column in projections.columns:
+        for column in data.columns:
             if column[: len(cat)] == cat:
                 c_.append(column)
             c[cat] = c_
@@ -130,24 +161,24 @@ def decode_projection_datatypes(projections, num_features, cat_features):
     for cat, names in c.items():
         print(f"decoding for category {cat}")
         if len(names) > 1:
-            # for multiclass categories, set the maximum value to the category instance
+            # for multiclass categories, set the maximum index as the category instance
             # get list of max probability per row for this category
 
-            projections[names] = pd.DataFrame(
-                np.eye(len(names))[np.argmax(projections[names].values, axis=1)],
+            data[names] = pd.DataFrame(
+                np.eye(len(names))[np.argmax(data[names].values, axis=1)],
                 columns=names,
             )
 
         else:
             # for binaries we simply round
-            projections[names] = projections[names].round(0)
+            data[names] = data[names].round(0)
 
-        projections[names] = projections[names].astype(int)
+        data[names] = data[names].astype(int)
 
-    return projections
+    return data
 
 
-def preprocess_adult(X: pd.DataFrame, y: pd.Series):
+def preprocess_adult(X: pd.DataFrame, y: pd.Series, num_features, drop_features):
     """
     Preprocessing specific to Adult census dataset
     """
@@ -159,6 +190,10 @@ def preprocess_adult(X: pd.DataFrame, y: pd.Series):
     X.loc[~X["native-country"].isin(["United-States", "Mexico"]), "native-country"] = (
         "Other"
     )
+
+    X[num_features] = X[num_features].astype(float)
+
+    X = X.drop(drop_features, axis=1)
 
     return X, y
 

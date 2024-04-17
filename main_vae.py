@@ -1,9 +1,10 @@
 from ucimlrepo import fetch_ucirepo
-from utils import fidelity, preprocess, sd, inference
+from utils import fidelity, preprocess, sd, inference, vae
 import json
 import os
 import pandas as pd
 from matplotlib import pyplot as plt
+import numpy as np
 
 # open configuration of datasets
 with open("datasets.json", "r") as f:
@@ -22,15 +23,18 @@ y = dataset.data.targets
 
 # dataset specific preprocessing
 if ds == "adult":
-    X, y = preprocess.preprocess_adult(X, y)
+    X, y = preprocess.preprocess_adult(
+        X, y, config[ds]["num_features"], config[ds]["drop_features"]
+    )
 else:
     pass
+
 
 # this dictionary will hold all the data we want to get results for
 data = {}
 
 # drop unnecessary features
-X = X.drop(config[ds]["drop_features"], axis=1)
+# X = X.drop(config[ds]["drop_features"], axis=1)
 
 # generate regular synthetic dataset (based on training set from same indices as later)
 X_train, _, y_train, _ = preprocess.traintest_split(X, y)
@@ -60,67 +64,63 @@ data["real"] = [X_train, X_test, y_train, y_test]
 data["synthetic"] = [syn_X_train, X_test, syn_y_train, y_test]
 
 
-# retrieve the encoder network
-encoder, predictor, network = sd.encoder_network(
-    input_dim=X_train.shape[1], latent_size=X_train.shape[1]
+# reshuffle data according to original dataframe
+X_train = preprocess.reshuffle(ori_X=X, prepr_X=X_train)
+X_test = preprocess.reshuffle(ori_X=X, prepr_X=X_test)
+syn_X_train = preprocess.reshuffle(ori_X=X, prepr_X=syn_X_train)
+syn_X_test = preprocess.reshuffle(ori_X=X, prepr_X=syn_X_test)
+
+# find num_classes list based on original data
+class_list = preprocess.get_num_classes_(X)
+
+# retrieve VAE (and its individual fitted components)
+latent_dim = 60
+hulf_vae = vae.VAE(
+    latent_dim=latent_dim,
+    compression_layers=[100],
+    decompression_layers=[100],
+    num_classes=class_list,
 )
-# fit the full network (automatically fits the encoder and predictor since they are part of the network)
+
+# KL loss is added as regularization loss inside the model
+hulf_vae.compile(optimizer="adam", loss="binary_crossentropy")
+
+# fit the VAE
 sd.fit_model(
-    model=network,
+    model=hulf_vae,
     X=X_train,
     y=y_train,
-    model_args={"batch_size": 128, "epochs": 100},
-    monitor="val_AUC",
+    model_args={"epochs": 1, "batch_size": 128},
+    monitor="val_loss",
+)
+# retrieve fitted instances of the encoder, decoder and predictor
+encoder, decoder, predictor = hulf_vae.encoder, hulf_vae.decoder, hulf_vae.predictor
+
+# generate data from the VAE and split into train and test
+sample_size = (X.shape[0], latent_dim)
+z = np.random.normal(loc=0.0, scale=1.0, size=sample_size)
+decoded = decoder.predict(z)
+vae_X = pd.DataFrame(decoded, columns=X_train.columns).astype(float)
+vae_y = (
+    pd.DataFrame(predictor.predict(vae_X), columns=[y_train.name])
+    .astype(float)
+    .round()
+    .astype(int)
 )
 
-# project data through the encoder
-
-emb_X_train = pd.DataFrame(
-    encoder.predict(X_train),
-    columns=["column_" + str(x) for x in list(range(len(X_train.columns)))],
-)
-emb_X_test = pd.DataFrame(
-    encoder.predict(X_test),
-    columns=["column_" + str(x) for x in list(range(len(X_test.columns)))],
-)
-
-# note that the test data was not seen during encoder training
-data["projected_real"] = [emb_X_train, emb_X_test, y_train, y_test]
-
-# create synthetic projections
-syn_emb_X, syn_emb_y = sd.generate(
-    emb_X_train, y_train, model="vae", sample_size=X.shape[0], projected=True
-)
-# split into train and test set
-syn_emb_X_train, syn_emb_X_test, syn_emb_y_train, syn_emb_y_test = (
-    preprocess.traintest_split(syn_emb_X, syn_emb_y)
-)
-data["projected_synthetic"] = [syn_emb_X_train, emb_X_test, syn_emb_y_train, y_test]
-
-# visualize projections to check if they are accurate
-# tsne_plot = fidelity.tsne_projections(emb_X_train, syn_emb_X_train)
-# tsne_plot.savefig(os.path.join("results", "adult", "tsne.png"))
-
-# pass projections through flipped encoder
-flipped_encoder = sd.flip_encoder(encoder)
-syn_dec_X_train = pd.DataFrame(
-    flipped_encoder.predict(syn_emb_X_train), columns=X_train.columns
-)
-
-
-# ensure data types are correct
 syn_dec_X_train = preprocess.decode_datatypes(
-    data=syn_dec_X_train,
+    data=vae_X,
     cat_features=config[ds]["cat_features"],
 )
 
-print(syn_dec_X_train.iloc[0, :].to_list())
+vae_X_train, vae_X_test, vae_y_train, vae_y_test = preprocess.traintest_split(
+    X=vae_X, y=vae_y
+)
 
-data["decoded_synthetic"] = [syn_dec_X_train, X_test, syn_emb_y_train, y_test]
-
+data["vae"] = [vae_X_train, vae_X_test, vae_y_train, vae_y_test]
 
 # setup result directory
-result_path = os.path.join("results", ds)
+result_path = os.path.join("results", ds, "vae")
 if not os.path.exists(result_path):
     os.makedirs(result_path)
 
@@ -134,7 +134,7 @@ with open(os.path.join(result_path, "results.txt"), "w") as file:
         regular_synthetic=data["synthetic"][0],
         decoded_synthetic=preprocess.sklearn_preprocessor(
             "normalize",
-            data=data["decoded_synthetic"][0],
+            data=data["vae"][0],
             features=config[ds]["num_features"],
         ),
         cat_features=config[ds]["cat_features"],
@@ -159,7 +159,7 @@ with open(os.path.join(result_path, "results.txt"), "w") as file:
         file.write("\n")
 
         # for synthetic and decoded synthetic projections, perform attribute inference on each possible sensitive field
-        if name in ["synthetic", "decoded_synthetic"]:
+        if name in ["synthetic", "vae"]:
             # attribute inference is done by predicting sensitive fields through leaked fields (all non-target fields, might change?)
             real_data = data["real"][0]
             sensitive_fields = config[ds]["sensitive_fields"]
