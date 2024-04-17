@@ -1,6 +1,10 @@
 # generate normal synthetic dataset
 import pandas as pd
-from sdv.single_table import GaussianCopulaSynthesizer, TVAESynthesizer
+from sdv.single_table import (
+    GaussianCopulaSynthesizer,
+    TVAESynthesizer,
+    CTGANSynthesizer,
+)
 from sdv.metadata import SingleTableMetadata
 import keras
 from keras import layers
@@ -45,6 +49,19 @@ def generate(
             batch_size=500,
             loss_factor=2,
             l2scale=1e-5,
+        )
+
+    elif model == "gan":
+        synthesizer = CTGANSynthesizer(
+            metadata=metadata,
+            embedding_dim=128,
+            generator_dim=(256, 256),
+            discriminator_dim=(256, 256),
+            batch_size=500,
+            verbose=True,
+            epochs=300,
+            cuda=False,
+            pac=10,
         )
 
     synthesizer.fit(df)

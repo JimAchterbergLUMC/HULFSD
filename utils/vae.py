@@ -28,10 +28,14 @@ class Encoder(keras.models.Model):
 
         # model building blocks
         self.hidden_layers = []
-        for nodes in self.compression_layers:
-            self.hidden_layers.append(layers.Dense(nodes, activation=None))
-        self.mean_out = layers.Dense(self.latent_dim, activation=None)
-        self.log_var_out = layers.Dense(self.latent_dim, activation=None)
+        for c, nodes in enumerate(self.compression_layers):
+            self.hidden_layers.append(
+                layers.Dense(nodes, activation=None, name=f"enc_hid_{c}")
+            )
+        self.mean_out = layers.Dense(self.latent_dim, activation=None, name="enc_mean")
+        self.log_var_out = layers.Dense(
+            self.latent_dim, activation=None, name="enc_logvar"
+        )
         self.sampling = Sampling()
 
     def call(self, inputs):
@@ -56,17 +60,24 @@ class Decoder(keras.models.Model):
 
         # model building blocks
         self.hidden_layers = []
-        for nodes in self.decompression_layers:
-            self.hidden_layers.append(layers.Dense(nodes, activation=None))
+        for c, nodes in enumerate(self.decompression_layers):
+            self.hidden_layers.append(
+                layers.Dense(nodes, activation=None, name=f"dec_hid_{c}")
+            )
 
         self.decoder_output = []
-        for classes in self.num_classes:
-            if classes <= 2:
-                dec_out = layers.Dense(units=1, activation="sigmoid")
+        for c, n_classes in enumerate(self.num_classes):
+            if n_classes <= 2:
+                dec_out = layers.Dense(
+                    units=1, activation="sigmoid", name=f"dec_out_noncat_{c}"
+                )
             else:
-                dec_out = layers.Dense(units=classes, activation="softmax")
+                dec_out = layers.Dense(
+                    units=n_classes, activation="softmax", name=f"dec_out_cat_{c}"
+                )
+
             self.decoder_output.append(dec_out)
-        self.concat = layers.Concatenate()
+        self.concat = layers.Concatenate(name="dec_concatenate")
 
     def call(self, inputs):
         # pass input through all the hidden layers, and finally the separate output layers and concatenate those
@@ -76,7 +87,9 @@ class Decoder(keras.models.Model):
 
         outputs = []
         for layer in self.decoder_output:
-            outputs.append(layer(x))
+            x = layer(x)
+            outputs.append(x)
+
         outputs = self.concat(outputs)
 
         return outputs
@@ -86,7 +99,7 @@ class Predictor(keras.models.Model):
 
     def __init__(self):
         super().__init__()
-        self.predict = layers.Dense(1, activation="sigmoid")
+        self.predict = layers.Dense(1, activation="sigmoid", name="pred_out")
 
     def call(self, inputs):
         output = self.predict(inputs)
@@ -102,6 +115,7 @@ class VAE(keras.models.Model):
         compression_layers,
         decompression_layers,
         num_classes,
+        loss_factor,
     ):
         super().__init__()
         # init arguments
@@ -109,6 +123,7 @@ class VAE(keras.models.Model):
         self.compression_layers = compression_layers
         self.decompression_layers = decompression_layers
         self.num_classes = num_classes
+        self.loss_factor = loss_factor
 
         # model building blocks
         self.encoder = Encoder(
@@ -126,7 +141,7 @@ class VAE(keras.models.Model):
         kl_loss = -0.5 * keras.ops.mean(
             z_log_var - keras.ops.square(z_mean) - keras.ops.exp(z_log_var) + 1
         )
-        self.add_loss(kl_loss)
+        self.add_loss((1 / self.loss_factor) * kl_loss)
         # we add KL loss as regularization term, cross entropy can be added when compiling
         # then the model automatically sums losses together
         reconstructed = self.decoder(z)
@@ -137,3 +152,32 @@ class VAE(keras.models.Model):
 # TBD:
 # - extent beyond binary classification
 # - add loss factor in KL loss
+# def max_prob_to_1(x):
+#             max_prob_index = keras.ops.argmax(x, axis=-1)
+#             rang = keras.ops.max(x) - keras.ops.min(x)
+#             softmax = keras.ops.softmax(x, -1)
+#             idx = keras.ops.cast(
+#                 keras.ops.round(keras.ops.sum(softmax * rang, -1)), dtype="int32"
+#             )
+#             output1 = keras.ops.one_hot(idx, num_classes=keras.ops.shape(x)[-1])
+
+#             output2 = keras.ops.one_hot(
+#                 max_prob_index, num_classes=keras.ops.shape(x)[-1]
+#             )
+
+#             return output1
+
+#         self.round_categoricals = layers.Lambda(
+#             lambda x: max_prob_to_1(x), name="dec_round_cat"
+#         )
+#         self.round_binaries = layers.Lambda(
+#             lambda x: keras.ops.round(x), name="dec_round_bin"
+#         )
+
+# if n_classes == 2:
+#     x = self.round_binaries(x)
+#     # x = keras.ops.argmax(x, axis=-1)
+#     # x = keras.ops.one_hot(x, num_classes=keras.ops.shape(x)[-1])
+# elif n_classes > 2:
+#     x = self.round_categoricals(x)
+#     # x = keras.ops.round(x)

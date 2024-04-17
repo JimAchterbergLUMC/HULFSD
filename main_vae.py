@@ -80,17 +80,18 @@ hulf_vae = vae.VAE(
     compression_layers=[100],
     decompression_layers=[100],
     num_classes=class_list,
+    loss_factor=1,  # how much more important is performance than regularization
 )
 
 # KL loss is added as regularization loss inside the model
-hulf_vae.compile(optimizer="adam", loss="binary_crossentropy")
+hulf_vae.compile(optimizer="adam", loss="binary_crossentropy", metrics=["AUC"])
 
 # fit the VAE
 sd.fit_model(
     model=hulf_vae,
     X=X_train,
     y=y_train,
-    model_args={"epochs": 1, "batch_size": 128},
+    model_args={"epochs": 100, "batch_size": 128},
     monitor="val_loss",
 )
 # retrieve fitted instances of the encoder, decoder and predictor
@@ -101,23 +102,27 @@ sample_size = (X.shape[0], latent_dim)
 z = np.random.normal(loc=0.0, scale=1.0, size=sample_size)
 decoded = decoder.predict(z)
 vae_X = pd.DataFrame(decoded, columns=X_train.columns).astype(float)
-vae_y = (
-    pd.DataFrame(predictor.predict(vae_X), columns=[y_train.name])
-    .astype(float)
-    .round()
-    .astype(int)
-)
+# vae_y = (
+#     pd.DataFrame(predictor.predict(vae_X), columns=[y_train.name])
+#     .astype(float)
+#     .round()
+#     .astype(int)
+# ).squeeze()
 
-syn_dec_X_train = preprocess.decode_datatypes(
+# print(vae_X)
+# print(vae_y)
+
+vae_X = preprocess.decode_datatypes(
     data=vae_X,
     cat_features=config[ds]["cat_features"],
 )
 
+# lets try to use regular y for training as well, so we are not synthetically generating this!
 vae_X_train, vae_X_test, vae_y_train, vae_y_test = preprocess.traintest_split(
-    X=vae_X, y=vae_y
+    X=vae_X, y=y
 )
 
-data["vae"] = [vae_X_train, vae_X_test, vae_y_train, vae_y_test]
+data["vae"] = [vae_X_train, X_test, vae_y_train, y_test]
 
 # setup result directory
 result_path = os.path.join("results", ds, "vae")

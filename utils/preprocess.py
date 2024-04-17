@@ -97,10 +97,11 @@ def infer_data_type(series: pd.Series):
     Infers data type of a pandas series.
     """
     # if only two values, it is binary
-    if len(series.unique()) == 2:
+    p = series.nunique(dropna=False)
+    if p == 2:
         return "binary"
     # if more than two values and not floats, it is multiclass
-    elif (len(series.unique()) > 2) and not (pd.api.types.is_float_dtype(series.dtype)):
+    elif not (pd.api.types.is_float_dtype(series.dtype)):
         return "multiclass"
     else:
         # else it is continuous (if it is numeric at least)

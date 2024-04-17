@@ -1,5 +1,5 @@
 from ucimlrepo import fetch_ucirepo
-from utils import fidelity, preprocess, sd, inference
+from utils import fidelity, preprocess, sd, inference, enc
 import json
 import os
 import pandas as pd
@@ -22,7 +22,12 @@ y = dataset.data.targets
 
 # dataset specific preprocessing
 if ds == "adult":
-    X, y = preprocess.preprocess_adult(X, y)
+    X, y = preprocess.preprocess_adult(
+        X,
+        y,
+        num_features=config[ds]["num_features"],
+        drop_features=config[ds]["drop_features"],
+    )
 else:
     pass
 
@@ -30,7 +35,7 @@ else:
 data = {}
 
 # drop unnecessary features
-X = X.drop(config[ds]["drop_features"], axis=1)
+# X = X.drop(config[ds]["drop_features"], axis=1)
 
 # generate regular synthetic dataset (based on training set from same indices as later)
 X_train, _, y_train, _ = preprocess.traintest_split(X, y)
@@ -60,36 +65,39 @@ data["real"] = [X_train, X_test, y_train, y_test]
 data["synthetic"] = [syn_X_train, X_test, syn_y_train, y_test]
 
 
-# retrieve the encoder network
-encoder, predictor, network = sd.encoder_network(
-    input_dim=X_train.shape[1], latent_size=X_train.shape[1]
+# retrieve the encoder model
+latent_dim = 16
+encoder_model = enc.EncoderModel(
+    latent_dim=latent_dim, input_dim=len(X_train.columns), compression_layers=[]
 )
+encoder_model.compile(optimizer="adam", loss="binary_crossentropy", metrics=["AUC"])
+
 # fit the full network (automatically fits the encoder and predictor since they are part of the network)
 sd.fit_model(
-    model=network,
+    model=encoder_model,
     X=X_train,
     y=y_train,
     model_args={"batch_size": 128, "epochs": 100},
     monitor="val_AUC",
 )
+# retrieve the encoder and predictor separately
+encoder, predictor = encoder_model.encoder, encoder_model.predictor
 
 # project data through the encoder
-
 emb_X_train = pd.DataFrame(
     encoder.predict(X_train),
-    columns=["column_" + str(x) for x in list(range(len(X_train.columns)))],
+    columns=["column_" + str(x) for x in list(range(latent_dim))],
 )
 emb_X_test = pd.DataFrame(
     encoder.predict(X_test),
-    columns=["column_" + str(x) for x in list(range(len(X_test.columns)))],
+    columns=["column_" + str(x) for x in list(range(latent_dim))],
 )
-
 # note that the test data was not seen during encoder training
 data["projected_real"] = [emb_X_train, emb_X_test, y_train, y_test]
 
 # create synthetic projections
 syn_emb_X, syn_emb_y = sd.generate(
-    emb_X_train, y_train, model="vae", sample_size=X.shape[0], projected=True
+    emb_X_train, y_train, model="copula", sample_size=X.shape[0], projected=True
 )
 # split into train and test set
 syn_emb_X_train, syn_emb_X_test, syn_emb_y_train, syn_emb_y_test = (
@@ -102,11 +110,11 @@ data["projected_synthetic"] = [syn_emb_X_train, emb_X_test, syn_emb_y_train, y_t
 # tsne_plot.savefig(os.path.join("results", "adult", "tsne.png"))
 
 # pass projections through flipped encoder
-flipped_encoder = sd.flip_encoder(encoder)
+flipped_encoder = encoder.flip()
+
 syn_dec_X_train = pd.DataFrame(
     flipped_encoder.predict(syn_emb_X_train), columns=X_train.columns
 )
-
 
 # ensure data types are correct
 syn_dec_X_train = preprocess.decode_datatypes(
@@ -114,7 +122,6 @@ syn_dec_X_train = preprocess.decode_datatypes(
     cat_features=config[ds]["cat_features"],
 )
 
-print(syn_dec_X_train.iloc[0, :].to_list())
 
 data["decoded_synthetic"] = [syn_dec_X_train, X_test, syn_emb_y_train, y_test]
 
