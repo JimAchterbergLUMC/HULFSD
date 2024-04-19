@@ -34,9 +34,6 @@ else:
 # this dictionary will hold all the data we want to get results for
 data = {}
 
-# drop unnecessary features
-# X = X.drop(config[ds]["drop_features"], axis=1)
-
 # generate regular synthetic dataset (based on training set from same indices as later)
 X_train, _, y_train, _ = preprocess.traintest_split(X, y)
 syn_X, syn_y = sd.generate(X_train, y_train, sample_size=X.shape[0], model="copula")
@@ -66,7 +63,7 @@ data["synthetic"] = [syn_X_train, X_test, syn_y_train, y_test]
 
 
 # retrieve the encoder model
-latent_dim = 16
+latent_dim = len(X_train.columns)
 encoder_model = enc.EncoderModel(
     latent_dim=latent_dim, input_dim=len(X_train.columns), compression_layers=[]
 )
@@ -109,9 +106,11 @@ data["projected_synthetic"] = [syn_emb_X_train, emb_X_test, syn_emb_y_train, y_t
 # tsne_plot = fidelity.tsne_projections(emb_X_train, syn_emb_X_train)
 # tsne_plot.savefig(os.path.join("results", "adult", "tsne.png"))
 
-# pass projections through flipped encoder
+# flip the encoder
 flipped_encoder = encoder.flip()
 
+
+# pass projections through flipped encoder
 syn_dec_X_train = pd.DataFrame(
     flipped_encoder.predict(syn_emb_X_train), columns=X_train.columns
 )
@@ -121,6 +120,14 @@ syn_dec_X_train = preprocess.decode_datatypes(
     data=syn_dec_X_train,
     cat_features=config[ds]["cat_features"],
 )
+
+# check accuracy of encoder inversion
+print("TRAINING DATA: ", X_train)
+print(
+    "TRAINING DATA THROUGH FLIPPED ENCODER: ",
+    pd.DataFrame(flipped_encoder.predict(emb_X_train), columns=X_train.columns),
+)
+print("GENERATED SYNTHETIC DECODED PROJECTIONS: ", syn_dec_X_train)
 
 
 data["decoded_synthetic"] = [syn_dec_X_train, X_test, syn_emb_y_train, y_test]

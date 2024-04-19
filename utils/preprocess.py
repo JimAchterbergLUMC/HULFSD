@@ -142,11 +142,11 @@ def decode_datatypes(data, cat_features):
     Use some threshold (i.e. 0.5) to round, while ensuring multiclass features only get 1 feature instance.
     """
     # [0,1] scale all data, then use a threshold for categoricals
-    # projections = sklearn_preprocessor(
-    #     processor="normalize",
-    #     data=projections,
-    #     features=projections.columns,
-    # )
+    data = sklearn_preprocessor(
+        processor="normalize",
+        data=data,
+        features=data.columns,
+    )
 
     data = data.copy()
 

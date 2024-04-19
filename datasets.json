@@ -5,7 +5,6 @@
             "sex",
             "workclass",
             "education",
-            "marital-status",
             "occupation",
             "relationship",
             "race",
@@ -19,7 +18,8 @@
         ],
         "drop_features": [
             "fnlwgt",
-            "education-num"
+            "education-num",
+            "marital-status"
         ],
         "sensitive_fields": [
             "age",

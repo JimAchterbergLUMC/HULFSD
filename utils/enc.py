@@ -9,17 +9,12 @@ import numpy as np
 
 
 class Encoder(keras.models.Model):
-    def __init__(
-        self,
-        output_dim,
-        input_dim,
-        compression_layers,
-    ):
+    def __init__(self, output_dim, input_dim, compression_layers=[], reverse=False):
         super().__init__()
         # init arguments
         self.output_dim = output_dim
         self.input_dim = input_dim
-
+        self.reverse = reverse
         self.compression_layers = compression_layers
 
         # model building blocks
@@ -29,7 +24,15 @@ class Encoder(keras.models.Model):
                 layers.Dense(nodes, activation=None, use_bias=False)
             )
 
-        self.out = layers.Dense(self.output_dim, activation=None, use_bias=False)
+        if reverse:
+            activation = None
+        else:
+            activation = "sigmoid"
+
+        self.out = layers.Dense(self.output_dim, activation=activation, use_bias=False)
+
+        if self.reverse:
+            self.inverse_sigmoid = layers.Lambda(lambda x: keras.ops.log(x / (1 - x)))
 
     def build(self, input_shape):
         # Define the shape of the input to the first hidden layer
@@ -48,6 +51,10 @@ class Encoder(keras.models.Model):
     def call(self, inputs):
         # pass input through all the hidden layers, and finally the output layer
         x = inputs
+
+        if self.reverse:
+            x = self.inverse_sigmoid(x)
+
         for layer in self.hidden_layers:
             x = layer(x)
 
@@ -56,6 +63,7 @@ class Encoder(keras.models.Model):
         return proj
 
     def flip(self):
+
         # set up the flipped model architecture
 
         rev_compression_layers = self.compression_layers
@@ -65,25 +73,24 @@ class Encoder(keras.models.Model):
             output_dim=self.input_dim,
             input_dim=self.output_dim,
             compression_layers=rev_compression_layers,
+            reverse=True,
         )
 
         # need to build the model before we can set weights
         flipped_encoder.build(input_shape=(self.output_dim,))
-        print(flipped_encoder.summary())
         inv_weights = []
 
         # retrieve weights and invert
         for layer in self.layers:
             if isinstance(layer, layers.Dense):
                 weights = layer.get_weights()
-                inv = np.squeeze(np.linalg.pinv(weights))
+                inv = np.squeeze(np.linalg.inv(weights))
                 inv_weights.append(inv)
 
         # set weights to the corresponding layers in reverse order since layers are reversed
         c = len(inv_weights) - 1
         for layer in flipped_encoder.layers:
             if isinstance(layer, layers.Dense):
-                print(layer)
                 layer.set_weights(weights=[inv_weights[c]])
                 c -= 1
 
