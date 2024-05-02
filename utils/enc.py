@@ -29,10 +29,18 @@ class Encoder(keras.models.Model):
         else:
             activation = "sigmoid"
 
-        self.out = layers.Dense(self.output_dim, activation=activation, use_bias=False)
+        reg = keras.regularizers.OrthogonalRegularizer(
+            factor=0.1,
+        )
 
-        if self.reverse:
-            self.inverse_sigmoid = layers.Lambda(lambda x: keras.ops.log(x / (1 - x)))
+        self.out = layers.Dense(
+            self.output_dim,
+            activation=activation,
+            use_bias=False,
+            # kernel_regularizer=reg,
+        )
+
+        self.inverse_sigmoid = layers.Lambda(lambda x: keras.ops.log(x / (1 - x)))
 
     def build(self, input_shape):
         # Define the shape of the input to the first hidden layer
@@ -79,18 +87,23 @@ class Encoder(keras.models.Model):
         # need to build the model before we can set weights
         flipped_encoder.build(input_shape=(self.output_dim,))
         inv_weights = []
+        # biases = []
 
         # retrieve weights and invert
         for layer in self.layers:
             if isinstance(layer, layers.Dense):
+                # weights, bias = layer.get_weights()
                 weights = layer.get_weights()
                 inv = np.squeeze(np.linalg.inv(weights))
                 inv_weights.append(inv)
+                # bias = -np.dot(bias.T, inv).T
+                # biases.append(bias)
 
         # set weights to the corresponding layers in reverse order since layers are reversed
         c = len(inv_weights) - 1
         for layer in flipped_encoder.layers:
             if isinstance(layer, layers.Dense):
+                # layer.set_weights(weights=[inv_weights[c], biases[c]])
                 layer.set_weights(weights=[inv_weights[c]])
                 c -= 1
 

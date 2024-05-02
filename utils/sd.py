@@ -36,7 +36,9 @@ def generate(
             metadata.update_column(column_name=feature, sdtype="numerical")
     if model == "copula":
         synthesizer = GaussianCopulaSynthesizer(
-            metadata=metadata, numerical_distributions=None, default_distribution="beta"
+            metadata=metadata,
+            numerical_distributions=None,
+            default_distribution="beta",
         )
     elif model == "vae":
         synthesizer = TVAESynthesizer(

@@ -74,7 +74,7 @@ sd.fit_model(
     model=encoder_model,
     X=X_train,
     y=y_train,
-    model_args={"batch_size": 128, "epochs": 100},
+    model_args={"batch_size": 512, "epochs": 100},
     monitor="val_AUC",
 )
 # retrieve the encoder and predictor separately
@@ -102,13 +102,8 @@ syn_emb_X_train, syn_emb_X_test, syn_emb_y_train, syn_emb_y_test = (
 )
 data["projected_synthetic"] = [syn_emb_X_train, emb_X_test, syn_emb_y_train, y_test]
 
-# visualize projections to check if they are accurate
-# tsne_plot = fidelity.tsne_projections(emb_X_train, syn_emb_X_train)
-# tsne_plot.savefig(os.path.join("results", "adult", "tsne.png"))
-
 # flip the encoder
 flipped_encoder = encoder.flip()
-
 
 # pass projections through flipped encoder
 syn_dec_X_train = pd.DataFrame(
@@ -120,18 +115,16 @@ syn_dec_X_train = preprocess.decode_datatypes(
     data=syn_dec_X_train,
     cat_features=config[ds]["cat_features"],
 )
-
-# check accuracy of encoder inversion
-print("TRAINING DATA: ", X_train)
-print(
-    "TRAINING DATA THROUGH FLIPPED ENCODER: ",
-    pd.DataFrame(flipped_encoder.predict(emb_X_train), columns=X_train.columns),
-)
-print("GENERATED SYNTHETIC DECODED PROJECTIONS: ", syn_dec_X_train)
-
-
 data["decoded_synthetic"] = [syn_dec_X_train, X_test, syn_emb_y_train, y_test]
-
+# check accuracy of encoder inversion
+print("TRAINING DATA: \n", X_train)
+print(
+    "TRAINING DATA THROUGH FLIPPED ENCODER: \n",
+    pd.DataFrame(flipped_encoder.predict(emb_X_train), columns=X_train.columns).round(
+        3
+    ),
+)
+print("GENERATED SYNTHETIC DECODED PROJECTIONS: \n", syn_dec_X_train)
 
 # setup result directory
 result_path = os.path.join("results", ds)
@@ -146,16 +139,15 @@ with open(os.path.join(result_path, "results.txt"), "w") as file:
     plots = fidelity.get_column_plots(
         real_data=data["real"][0],
         regular_synthetic=data["synthetic"][0],
-        decoded_synthetic=preprocess.sklearn_preprocessor(
-            "normalize",
-            data=data["decoded_synthetic"][0],
-            features=config[ds]["num_features"],
-        ),
+        decoded_synthetic=data["decoded_synthetic"][0],
         cat_features=config[ds]["cat_features"],
         num_features=config[ds]["num_features"],
     )
-
     plots.savefig(os.path.join(result_path, "fidelity.png"))
+
+    # visualize projections to check if they are accurate
+    tsne_plot = fidelity.tsne_projections(emb_X_train, syn_emb_X_train)
+    tsne_plot.savefig(os.path.join(result_path, "tsne.png"))
 
     # loop over the different datasets for which we want to get results
     for name, (X_tr, X_te, y_tr, y_te) in data.items():
