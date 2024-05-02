@@ -6,36 +6,6 @@ import numpy as np
 # includes scripts for general and dataset specific preprocessing
 
 # this sets the random state to be similar across train test splits, so we get the same indices
-random_state = 999
-
-
-def reshuffle(ori_X, prepr_X):
-    """
-    Reshuffle a preprocessed dataset according to the original dataframe column order.
-    Only works if column names of preprocessed columns start with the full original column name.
-    """
-    reindex_cols = []
-    for col in ori_X:
-        # in a list store all column names starting with col
-        for col_ in prepr_X:
-            if col_.startswith(col):
-                reindex_cols.append(col_)
-    prepr_X = prepr_X[reindex_cols]
-    return prepr_X
-
-
-def get_num_classes_(ori_X):
-    classes = []
-    for col in ori_X.columns:
-        dt = infer_data_type(ori_X[col])
-        if dt == "multiclass":
-            n_class = ori_X[col].nunique(dropna=False)
-        elif dt == "binary":
-            n_class = 2
-        elif dt == "continuous":
-            n_class = 1
-        classes.append(n_class)
-    return classes
 
 
 def sklearn_preprocessor(processor: str, data: pd.DataFrame, features: list):
@@ -64,32 +34,61 @@ def sklearn_preprocessor(processor: str, data: pd.DataFrame, features: list):
     return data
 
 
-def preprocess(X: pd.DataFrame, y: pd.Series, cat_features: list, num_features: list):
-    """
-    Preprocesses predictors and targets to train and test sets ready for validation. Performs one hot encoding on categoricals and normalization for numericals independently in train and test sets.
-    """
-    # one hot encode all categoricals (also binaries, is handled by encoder)
-    X = sklearn_preprocessor(processor="one-hot", data=X, features=cat_features)
+def sd_preprocess(X: pd.DataFrame, y: pd.Series, config: dict, random_state: int):
+    # regular synthetic data requires only encoding, dropping, and train test split preprocessing (no one hot/normalizing)
 
-    # setup train test split
+    ds_name = config["name"]
+
+    # dataset specific encoding
+    if ds_name == "adult":
+        X, y = preprocess_adult(X=X, y=y)
+
+    # drop features
+    X = X.drop(config["drop_features"], axis=1, errors="ignore")
+
+    # turn numericals into floats
+    X[config["num_features"]] = X[config["num_features"]].astype(float)
+
+    # split train test
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, stratify=y, test_size=0.3, random_state=random_state
     )
 
-    # scale numericals after splitting (to avoid information leakage)
-    X_train = sklearn_preprocessor(
-        processor="normalize", data=X_train, features=num_features
-    )
-    X_test = sklearn_preprocessor(
-        processor="normalize", data=X_test, features=num_features
+    return X_train, X_test, y_train, y_test
+
+
+def preprocess(X: pd.DataFrame, y: pd.Series, config: dict, random_state: int):
+    ds_name = config["name"]
+
+    # dataset specific encoding
+    if ds_name == "adult":
+        X, y = preprocess_adult(X=X, y=y)
+
+    # drop features
+    X = X.drop(config["drop_features"], axis=1, errors="ignore")
+
+    # turn numericals into floats
+    X[config["num_features"]] = X[config["num_features"]].astype(float)
+
+    # one hot encode
+    X = sklearn_preprocessor(
+        processor="one-hot", data=X, features=config["cat_features"]
     )
 
-    return (
-        X_train,
-        X_test,
-        y_train,
-        y_test,
+    # split train test
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, stratify=y, test_size=0.3, random_state=random_state
     )
+
+    # normalize numericals
+    X_train = sklearn_preprocessor(
+        processor="normalize", data=X_train, features=config["num_features"]
+    )
+    X_test = sklearn_preprocessor(
+        processor="normalize", data=X_test, features=config["num_features"]
+    )
+
+    return X_train, X_test, y_train, y_test
 
 
 def infer_data_type(series: pd.Series):
@@ -137,7 +136,7 @@ def decoding_onehot(df: pd.DataFrame, categorical_features: list):
     return df
 
 
-def decode_datatypes(data, cat_features):
+def postprocess_projections(data, config):
     """
     Use some threshold (i.e. 0.5) to round, while ensuring multiclass features only get 1 feature instance.
     """
@@ -151,6 +150,7 @@ def decode_datatypes(data, cat_features):
     data = data.copy()
 
     # store list of preprocessed names per categorical feature in a dictionary
+    cat_features = config["cat_features"]
     c = {}
     for cat in cat_features:
         c_ = []
@@ -179,12 +179,15 @@ def decode_datatypes(data, cat_features):
     return data
 
 
-def preprocess_adult(X: pd.DataFrame, y: pd.Series, num_features, drop_features):
+def preprocess_adult(X, y):
     """
     Preprocessing specific to Adult census dataset
     """
     # encode target income
-    y = y.income.copy()
+    if isinstance(y, pd.DataFrame):
+        y = y.income.copy()
+    else:
+        y = y.copy()
     y = y.replace({"<=50K": 0, "<=50K.": 0, ">50K": 1, ">50K.": 1})
 
     # encode native-country as: US, Mexico, Other
@@ -192,19 +195,7 @@ def preprocess_adult(X: pd.DataFrame, y: pd.Series, num_features, drop_features)
         "Other"
     )
 
-    X[num_features] = X[num_features].astype(float)
-
-    X = X.drop(drop_features, axis=1)
-
     return X, y
-
-
-def traintest_split(X: pd.DataFrame, y: pd.Series):
-    # setup train test split with same random state across splits
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, stratify=y, test_size=0.3, random_state=random_state
-    )
-    return X_train, X_test, y_train, y_test
 
 
 # TBD:

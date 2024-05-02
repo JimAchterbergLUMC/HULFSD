@@ -1,204 +1,148 @@
 from ucimlrepo import fetch_ucirepo
-from utils import fidelity, preprocess, sd, inference, enc
+from utils import preprocess, sd, inference, enc
 import json
 import os
 import pandas as pd
-from matplotlib import pyplot as plt
-
-# open configuration of datasets
-with open("datasets.json", "r") as f:
-    config = json.load(f)
-
-# set which dataset we are using (and assert it is one of the options)
-ds = "adult"
-assert ds in ["adult", "bank", "credit", "shopping"]
-
-# fetch real dataset
-dataset = fetch_ucirepo(id=config[ds]["id"])
-# load features and target
-X = dataset.data.features
-y = dataset.data.targets
+from sklearn.model_selection import train_test_split
 
 
-# dataset specific preprocessing
-if ds == "adult":
-    X, y = preprocess.preprocess_adult(
-        X,
-        y,
-        num_features=config[ds]["num_features"],
-        drop_features=config[ds]["drop_features"],
+def exec__(ds: str, sd_model: str):
+    assert ds in ["adult", "bank", "credit", "shopping"]
+    assert sd_model in ["copula", "gan", "vae"]
+    random_state = 999  # for reproducible random data splitting
+
+    # load data
+    with open("datasets.json", "r") as f:
+        config = json.load(f)
+    config = config[ds]
+    dataset = fetch_ucirepo(id=config["id"])
+    X = dataset.data.features
+    y = dataset.data.targets
+
+    # setup data dictionary storing all data
+    data = {}
+
+    # generate regular synthetic data
+    X_train, X_test, y_train, y_test = preprocess.sd_preprocess(
+        X=X, y=y, config=config, random_state=random_state
     )
-else:
-    pass
-
-# this dictionary will hold all the data we want to get results for
-data = {}
-
-# generate regular synthetic dataset (based on training set from same indices as later)
-X_train, _, y_train, _ = preprocess.traintest_split(X, y)
-syn_X, syn_y = sd.generate(X_train, y_train, sample_size=X.shape[0], model="copula")
-
-
-# general preprocessing: one hot encoding, normalization
-X_train, X_test, y_train, y_test = preprocess.preprocess(
-    X,
-    y,
-    cat_features=config[ds]["cat_features"],
-    num_features=config[ds]["num_features"],
-)
-data["real"] = [X_train, X_test, y_train, y_test]
-
-(
-    syn_X_train,
-    syn_X_test,
-    syn_y_train,
-    syn_y_test,
-) = preprocess.preprocess(
-    syn_X,
-    syn_y,
-    cat_features=config[ds]["cat_features"],
-    num_features=config[ds]["num_features"],
-)
-data["synthetic"] = [syn_X_train, X_test, syn_y_train, y_test]
-
-
-# retrieve the encoder model
-latent_dim = len(X_train.columns)
-encoder_model = enc.EncoderModel(
-    latent_dim=latent_dim, input_dim=len(X_train.columns), compression_layers=[]
-)
-encoder_model.compile(optimizer="adam", loss="binary_crossentropy", metrics=["AUC"])
-
-# fit the full network (automatically fits the encoder and predictor since they are part of the network)
-sd.fit_model(
-    model=encoder_model,
-    X=X_train,
-    y=y_train,
-    model_args={"batch_size": 512, "epochs": 100},
-    monitor="val_AUC",
-)
-# retrieve the encoder and predictor separately
-encoder, predictor = encoder_model.encoder, encoder_model.predictor
-
-# project data through the encoder
-emb_X_train = pd.DataFrame(
-    encoder.predict(X_train),
-    columns=["column_" + str(x) for x in list(range(latent_dim))],
-)
-emb_X_test = pd.DataFrame(
-    encoder.predict(X_test),
-    columns=["column_" + str(x) for x in list(range(latent_dim))],
-)
-# note that the test data was not seen during encoder training
-data["projected_real"] = [emb_X_train, emb_X_test, y_train, y_test]
-
-# create synthetic projections
-syn_emb_X, syn_emb_y = sd.generate(
-    emb_X_train, y_train, model="copula", sample_size=X.shape[0], projected=True
-)
-# split into train and test set
-syn_emb_X_train, syn_emb_X_test, syn_emb_y_train, syn_emb_y_test = (
-    preprocess.traintest_split(syn_emb_X, syn_emb_y)
-)
-data["projected_synthetic"] = [syn_emb_X_train, emb_X_test, syn_emb_y_train, y_test]
-
-# flip the encoder
-flipped_encoder = encoder.flip()
-
-# pass projections through flipped encoder
-syn_dec_X_train = pd.DataFrame(
-    flipped_encoder.predict(syn_emb_X_train), columns=X_train.columns
-)
-
-# ensure data types are correct
-syn_dec_X_train = preprocess.decode_datatypes(
-    data=syn_dec_X_train,
-    cat_features=config[ds]["cat_features"],
-)
-data["decoded_synthetic"] = [syn_dec_X_train, X_test, syn_emb_y_train, y_test]
-# check accuracy of encoder inversion
-print("TRAINING DATA: \n", X_train)
-print(
-    "TRAINING DATA THROUGH FLIPPED ENCODER: \n",
-    pd.DataFrame(flipped_encoder.predict(emb_X_train), columns=X_train.columns).round(
-        3
-    ),
-)
-print("GENERATED SYNTHETIC DECODED PROJECTIONS: \n", syn_dec_X_train)
-
-# setup result directory
-result_path = os.path.join("results", ds)
-if not os.path.exists(result_path):
-    os.makedirs(result_path)
-
-# get results and write them to a text file
-with open(os.path.join(result_path, "results.txt"), "w") as file:
-    # check fidelity of regular synthetic and decoded synthetic projections (perhaps also add income as feature)
-    print("generating plots")
-
-    plots = fidelity.get_column_plots(
-        real_data=data["real"][0],
-        regular_synthetic=data["synthetic"][0],
-        decoded_synthetic=data["decoded_synthetic"][0],
-        cat_features=config[ds]["cat_features"],
-        num_features=config[ds]["num_features"],
+    syn_X, syn_y = sd.generate(
+        X=X_train, y=y_train, sample_size=X.shape[0], model=sd_model, model_args={}
     )
-    plots.savefig(os.path.join(result_path, "fidelity.png"))
 
-    # visualize projections to check if they are accurate
-    tsne_plot = fidelity.tsne_projections(emb_X_train, syn_emb_X_train)
-    tsne_plot.savefig(os.path.join(result_path, "tsne.png"))
+    # fully preprocess real data
+    X_train, X_test, y_train, y_test = preprocess.preprocess(
+        X=X, y=y, config=config, random_state=random_state
+    )
+    data["real"] = [X_train, X_test, y_train, y_test]
 
-    # loop over the different datasets for which we want to get results
-    for name, (X_tr, X_te, y_tr, y_te) in data.items():
-        print(f"at dataset {name}")
-        print("calculating utility")
-        file.write(f"Dataset: {name} \n")
-        best_models, best_scores = inference.utility(
-            X_train=X_tr, X_test=X_te, y_train=y_tr, y_test=y_te
+    # preprocess synthetic data
+    syn_X_train, syn_X_test, syn_y_train, syn_y_test = preprocess.preprocess(
+        X=syn_X, y=syn_y, config=config, random_state=random_state
+    )
+    data["regular_synthetic"] = [syn_X_train, X_test, syn_y_train, y_test]
+
+    # generate synthetic projections
+    latent_dim = X_train.shape[1]
+    proj_model = enc.EncoderModel(
+        latent_dim=latent_dim, input_dim=latent_dim, compression_layers=[]
+    )
+    proj_model.compile(optimizer="adam", loss="binary_crossentropy", metrics=["AUC"])
+    sd.fit_model(
+        model=proj_model,
+        X=X_train,
+        y=y_train,
+        model_args={"batch_size": 512, "epochs": 100},
+        monitor="val_AUC",
+    )
+    encoder, predictor = proj_model.encoder, proj_model.predictor
+    proj_X_train = pd.DataFrame(
+        encoder.predict(X_train),
+        columns=["column_" + str(x) for x in list(range(latent_dim))],
+    )
+    proj_X_test = pd.DataFrame(
+        encoder.predict(X_test),
+        columns=["column_" + str(x) for x in list(range(latent_dim))],
+    )
+    data["real_projected"] = [proj_X_train, proj_X_test, y_train, y_test]
+    syn_proj_X, syn_proj_y = sd.generate(
+        X=proj_X_train,
+        y=y_train,
+        sample_size=X.shape[0],
+        model=sd_model,
+        model_args={},
+        projected=True,
+    )
+    syn_proj_X_train, syn_proj_X_test, syn_proj_y_train, syn_proj_y_test = (
+        train_test_split(
+            syn_proj_X,
+            syn_proj_y,
+            stratify=syn_proj_y,
+            test_size=0.3,
+            random_state=random_state,
         )
+    )
+    data["synthetic_projected"] = [
+        syn_proj_X_train,
+        proj_X_test,
+        syn_proj_y_train,
+        y_test,
+    ]
 
-        result = pd.DataFrame(best_scores, columns=best_models, index=["test_score"])
-        # also check decoder performance on test set?
-        file.write(f"Utility result: \n")
-        file.write(result.to_string(header=True, index=True))
-        file.write("\n")
+    # generate decoded synthetic projections
+    decoder = encoder.flip()
+    syn_dec_X_train = pd.DataFrame(
+        decoder.predict(syn_proj_X_train), columns=X_train.columns
+    )
+    syn_dec_X_train = preprocess.postprocess_projections(
+        data=syn_dec_X_train, config=config
+    )
+    data["synthetic_decoded"] = [
+        syn_dec_X_train,
+        X_test,
+        syn_proj_y_train,
+        y_test,
+    ]  # or should we just use y_train?
 
-        # for synthetic and decoded synthetic projections, perform attribute inference on each possible sensitive field
-        if name in ["synthetic", "decoded_synthetic"]:
-            # attribute inference is done by predicting sensitive fields through leaked fields (all non-target fields, might change?)
-            real_data = data["real"][0]
-            sensitive_fields = config[ds]["sensitive_fields"]
-            for sens in sensitive_fields:
-                print(f"calculating attribute inference for {sens}")
+    # find fidelity
+    fid_plots = inference.get_column_plots(
+        data["real"][0],
+        data["regular_synthetic"][0],
+        data["synthetic_decoded"][0],
+        config,
+    )
+    fid_tsne = inference.tsne_projections(
+        real=data["real_projected"][0], synthetic=data["synthetic_projected"][0]
+    )
 
-                # do we need to process data back to non-onehot?
-                best_models, best_scores = inference.attribute_inference(
-                    real_data=real_data,
-                    synthetic_data=X_tr,
-                    sensitive_field=sens,
-                )
-                result = pd.DataFrame(
-                    best_scores,
-                    columns=best_models,
-                    index=[f"{sens} inference accuracy"],
-                )
-                file.write(f"Privacy against inference result: \n")
-                file.write(result.to_string(header=True, index=True))
-                file.write("\n")
+    # find utility
+    ut = inference.get_utility_(data=data)
 
-            # compute authenticity score for regular synthetic and decoded synthetic projections
-            print("calculating sample authenticity")
-            auth_labels = inference.authenticity(
-                real_data=real_data, synthetic_data=X_tr, metric="euclidean"
-            )
-            result = pd.DataFrame(
-                auth_labels.mean(), columns=["Average"], index=["Authenticity score"]
-            )
-            file.write(f"Authenticity score result: \n")
-            file.write(result.to_string(header=True, index=True))
-            file.write("\n")
+    # find privacy
+    aia = inference.get_attribute_inference_(
+        data=data, sd_sets=["regular_synthetic", "synthetic_decoded"], config=config
+    )
+    auth = inference.get_authenticity_(
+        data=data, sd_sets=["regular_synthetic", "synthetic_decoded"], config=config
+    )
 
-        # end of current data loop
-        file.write("\n \n")
-        file.flush()
+    return fid_plots, fid_tsne, ut, aia, auth
+
+
+if __name__ == "__main__":
+    ds = "adult"
+    sd_model = "copula"
+
+    # get results
+    fid_plots, fid_tsne, ut, aia, auth = exec__(ds=ds, sd_model=sd_model)
+
+    # save results for specific dataset and specific synthetic data generating model
+    result_path = os.path.join("results", ds, sd_model)
+    if not os.path.exists(result_path):
+        os.makedirs(result_path)
+
+    fid_plots.savefig(os.path.join(result_path, "fidelity_plot.png"))
+    fid_tsne.savefig(os.path.join(result_path, "tsne_plot.png"))
+    ut.to_csv(os.path.join(result_path, "utility.csv"))
+    aia.to_csv(os.path.join(result_path, "attribute_inference.csv"))
+    auth.to_csv(os.path.join(result_path, "authenticity.csv"))

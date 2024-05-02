@@ -1,5 +1,6 @@
 {
     "adult": {
+        "name": "adult",
         "id": 2,
         "cat_features": [
             "sex",
