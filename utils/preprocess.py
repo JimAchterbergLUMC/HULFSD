@@ -14,7 +14,7 @@ def sklearn_preprocessor(processor: str, data: pd.DataFrame, features: list):
     """
     assert processor in ["one-hot", "normalize"]
     if processor == "one-hot":
-        processor = OneHotEncoder(drop="if_binary")
+        processor = OneHotEncoder(drop=None)
     elif processor == "normalize":
         processor = MinMaxScaler((0, 1))
 
@@ -160,7 +160,6 @@ def postprocess_projections(data, config):
             c[cat] = c_
 
     for cat, names in c.items():
-        print(f"decoding for category {cat}")
         if len(names) > 1:
             # for multiclass categories, set the maximum index as the category instance
             # get list of max probability per row for this category
@@ -198,6 +197,26 @@ def preprocess_adult(X, y):
     return X, y
 
 
-# TBD:
-# should more categoricals be merged?
-# should numericals receive other transformations?
+def decode_categorical_target(data: pd.DataFrame, target: str):
+    """
+    If a target feature is categorical and one hot encoded, decode the target back so we can do regular categorical prediction.
+    If no target feature found, raise exception. If single target feature found, do nothing. If more than 1, decode to single feature and
+    replace original one hot encoded features.
+    """
+
+    real_target = []
+    for col in data.columns:
+        if col.split("_")[0] == target:
+            real_target.append(col)
+
+    if len(real_target) == 0:
+        raise Exception("No target feature found in columns")
+    elif len(real_target) > 1:
+        y = data[real_target]
+        y = y.idxmax(axis=1)
+        y = y.squeeze()
+        y.name = target
+        data = data.drop(real_target, axis=1)
+        data = pd.concat([data, y], axis=1)
+
+    return data

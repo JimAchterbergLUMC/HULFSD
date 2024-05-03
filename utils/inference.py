@@ -13,7 +13,10 @@ from skopt import BayesSearchCV
 
 
 def get_utility_(data: dict):
-    # loops over datasets and finds best prediction model with corresponding test score for each
+    """
+    Retrieves utility scores for a dictionary of datasets and formats output. Dictionary of datasets is in the format:
+    key:[X_train,X_test,y_train,y_test]. See utility() function for what utility score means.
+    """
     output = []
     for name, (X_tr, X_te, y_tr, y_te) in data.items():
         best_models, best_scores = utility(X_tr, X_te, y_tr, y_te)
@@ -23,8 +26,8 @@ def get_utility_(data: dict):
         if isinstance(output, pd.DataFrame):
             output = pd.concat([output, result], ignore_index=True)
         else:
-            output = result
-        return output
+            output = result.copy()
+    return output
 
 
 def utility(
@@ -33,6 +36,13 @@ def utility(
     y_train: pd.Series,
     y_test: pd.Series,
 ):
+    """
+    Finds utility score. Utility score is defined as the prediction performance on a test set.
+    The unit of this score depends on the datatype of the target, i.e. binary, categorical, continuous,
+    and is automatically inferred. Bayesian hyperparameter selection is performed.
+    returns: lists of best models and corresponding best scores.
+
+    """
     # infer datatype of target
     dt = preprocess.infer_data_type(y_train)
     assert dt in ["binary", "multiclass", "continuous"]
@@ -68,9 +78,19 @@ def utility(
     return best_models, best_scores
 
 
-def get_attribute_inference_(data, sd_sets, config):
+def get_attribute_inference_(
+    data: pd.DataFrame, config: dict, sd_sets: list = [], real_key: str = "real"
+):
+    """
+    Retrieves attribute inference scores for a dictionary of datasets and formats output. Dictionary of datasets is in the format:
+    key:[X_train,X_test,y_train,y_test]. See attribute_inference() function for what attribute inference score means.
+
+    sd_sets: keys of datasets which are synthetic (and thus used to train attribute inference models)
+    real_key: key which denotes the real dataset (and thus used to test attribute inference models)
+
+    """
     output = []
-    real_data = data["real"][0]
+    real_data = data[real_key][0]
     sensitive_fields = config["sensitive_fields"]
     for name, (X_tr, X_te, y_tr, y_te) in data.items():
         if name in sd_sets:
@@ -81,14 +101,21 @@ def get_attribute_inference_(data, sd_sets, config):
                     sensitive_field=sensitive_field,
                 )
                 names = np.repeat(name, len(best_models))
-                res = np.column_stack((names, best_models, best_scores))
+                fields = np.repeat(sensitive_field, len(best_models))
+                res = np.column_stack((names, fields, best_models, best_scores))
                 result = pd.DataFrame(
-                    res, columns=["dataset", "best models", "best scores"]
+                    res,
+                    columns=[
+                        "dataset",
+                        "sensitive target feature",
+                        "best models",
+                        "best scores",
+                    ],
                 )
                 if isinstance(output, pd.DataFrame):
                     output = pd.concat([output, result], ignore_index=True)
                 else:
-                    output = result
+                    output = result.copy()
     return output
 
 
@@ -102,45 +129,54 @@ def attribute_inference(
 
     """
 
-    # find preprocessed names of sensitive fields (first word will always equal original feature name)
-    c = []
-    for column in real_data.columns:
-        if column[: len(sensitive_field)] == sensitive_field:
-            c.append(column)
-    y_train_syn = synthetic_data[c]
-    y_test_real = real_data[c]
-    # if more than 1, decode back to single feature (with categories corresponding to column names)
-    if len(c) > 1:
-        y_train_syn = y_train_syn.idxmax(axis=1)
-        y_test_real = y_test_real.idxmax(axis=1)
-    y_train_syn, y_test_real = y_train_syn.squeeze(), y_test_real.squeeze()
+    # decode sensitive target to single feature with original target name (if one hot encoded)
+    real_data = preprocess.decode_categorical_target(
+        data=real_data, target=sensitive_field
+    )
+    synthetic_data = preprocess.decode_categorical_target(
+        data=synthetic_data, target=sensitive_field
+    )
 
-    # key fields are all fields except for the sensitive fields
-    key_fields = [x for x in real_data.columns if x not in c]
+    print(real_data)
+    print(synthetic_data)
+
+    # key fields are all fields except for the sensitive field
+    key_fields = [x for x in real_data.columns if x != sensitive_field]
 
     best_models, best_scores = utility(
         X_train=synthetic_data[key_fields],
         X_test=real_data[key_fields],
-        y_train=y_train_syn,  # potentially dataframe instead of series
-        y_test=y_test_real,
+        y_train=synthetic_data[sensitive_field],
+        y_test=real_data[sensitive_field],
     )
     return best_models, best_scores
 
 
-def get_authenticity_(data, sd_sets, config):
+def get_authenticity_(data: pd.DataFrame, sd_sets: list = [], real_key: str = "real"):
+    """
+    Retrieves authenticity scores for a dictionary of datasets and formats output. Dictionary of datasets is in the format:
+    key:[X_train,X_test,y_train,y_test]. See authenticity() function for what authenticity score means.
+
+    sd_sets: list of keys of datasets which are synthetic (and thus used to train attribute inference models)
+    real_key: single key which denotes the real dataset (and thus used to test attribute inference models)
+
+    """
+
     output = []
-    real_data = data["real"][0]
-    for name, (X_tr, X_te, y_tr, y_te) in data.items():
+    real_data = data[real_key][0]
+    for name, (X_tr, _, _, _) in data.items():
         if name in sd_sets:
             score = authenticity(
                 real_data=real_data, synthetic_data=X_tr, metric="euclidean"
             )
-            result = pd.DataFrame([name, score], columns=["dataset", "scores"])
+            result = pd.DataFrame(
+                np.array([[name], [score]]).T, index=[0], columns=["dataset", "scores"]
+            )
             if isinstance(output, pd.DataFrame):
                 output = pd.concat([output, result], ignore_index=True)
             else:
-                output = result
-        return output
+                output = result.copy()
+    return output
 
 
 def authenticity(
@@ -244,7 +280,7 @@ def get_column_plots(
     real_data: pd.DataFrame,
     regular_synthetic: pd.DataFrame,
     decoded_synthetic: pd.DataFrame,
-    config,
+    config: dict,
 ):
     """
     Get plots of real data, regular synthetic data, and decoded synthetic projections.
@@ -300,10 +336,23 @@ def plot_dataframe(df: pd.DataFrame, ncols: int, rotate_labels: bool):
         dt = preprocess.infer_data_type(df[col])
         if dt == "continuous":
             sns.histplot(data=df, x=col, hue="dataset", alpha=0.5, ax=ax)
-            # sns.histplot(data=df, x=col, hue="dataset", alpha=0.5)
         else:
-            sns.countplot(data=df, x=col, hue="dataset", stat="proportion", ax=ax)
-            # sns.countplot(data=df, x=col, hue="dataset", stat="proportion")
+            sns.countplot(
+                data=df,
+                x=col,
+                hue="dataset",
+                stat="count",
+                ax=ax,
+            )
+            # sns.histplot(
+            #     data=df,
+            #     x=col,
+            #     hue="dataset",
+            #     stat="proportion",
+            #     ax=ax,
+            #     common_norm=False,
+            #     alpha=0.5,
+            # )
 
         # Remove individual legends from subplots
         if ax.get_legend():
@@ -320,7 +369,7 @@ def plot_dataframe(df: pd.DataFrame, ncols: int, rotate_labels: bool):
     plt.tight_layout()
 
 
-def tsne_projections(real, synthetic):
+def tsne_projections(real: pd.DataFrame, synthetic: pd.DataFrame):
     X = pd.concat([real, synthetic], axis=0)
     X = X.reset_index(drop=True)
     perplexity = 35
@@ -329,7 +378,7 @@ def tsne_projections(real, synthetic):
         learning_rate="auto",
         init="pca",
         perplexity=perplexity,
-        verbose=10,
+        verbose=0,
     ).fit_transform(X)
     emb = pd.DataFrame(tsne, index=np.arange(tsne.shape[0]), columns=["comp1", "comp2"])
 
@@ -345,13 +394,8 @@ def tsne_projections(real, synthetic):
 
     labels = labels.reset_index(drop=True)
     emb = emb.reset_index(drop=True)
-    print(emb)
-    print(labels)
     emb = pd.concat([emb, labels], axis=1)
     emb.columns = ["comp1", "comp2", "labels"]
-
-    print(emb)
-
     plt.figure(figsize=(10, 6))
     sns.scatterplot(data=emb, x="comp1", y="comp2", hue="labels", alpha=0.1)
     plt.title(f"tSNE plot ({perplexity} perplexity)", fontsize=11)
