@@ -1,4 +1,4 @@
-# generate normal synthetic dataset
+import numpy as np
 import pandas as pd
 from sdv.single_table import (
     GaussianCopulaSynthesizer,
@@ -6,10 +6,11 @@ from sdv.single_table import (
     CTGANSynthesizer,
 )
 from sdv.metadata import SingleTableMetadata
+import os
+
+os.environ["KERAS_BACKEND"] = "torch"
 import keras
 from keras import layers
-import os
-import numpy as np
 
 
 # includes scripts for generating synthetic data (regular or projections)
