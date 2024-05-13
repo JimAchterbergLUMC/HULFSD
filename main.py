@@ -123,7 +123,7 @@ def exec__(
 
     # find fidelity
     print("Making column plots")
-    fid_plots = inference.get_column_plots(
+    fid_plots = inference.get_column_plots_(
         data["real"][0],
         data["regular_synthetic"][0],
         data["synthetic_decoded"][0],
@@ -131,8 +131,10 @@ def exec__(
     )
     fid_plots.savefig(os.path.join(result_path, "fidelity_plot.png"))
     print("Making tSNE plot")
-    fid_tsne = inference.tsne_projections(
-        real=data["real_projected"][0], synthetic=data["synthetic_projected"][0]
+    fid_tsne = inference.get_projection_plot_(
+        real=data["real_projected"][0],
+        synthetic=data["synthetic_projected"][0],
+        type="tsne",
     )
     fid_tsne.savefig(os.path.join(result_path, "tsne_plot.png"))
 
