@@ -3,4 +3,4 @@ ucimlrepo==0.0.6
 certifi==2024.2.2
 seaborn==0.13.2
 scikit-optimize==0.10.1
-tensorflow==2.16.1
+keras==3.3.3

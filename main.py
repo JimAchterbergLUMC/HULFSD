@@ -158,21 +158,22 @@ def exec__(
 
 
 if __name__ == "__main__":
-    ds = "adult"
-    sd_model = "copula"
+    datasets = ["adult"]
+    sd_models = ["copula"]
     sd_model_args = {}
     proj_model_args = {"epochs": 100, "batch_size": 512}
 
-    # save results for specific dataset and specific synthetic data generating model
-    result_path = os.path.join("results", ds, sd_model)
-    if not os.path.exists(result_path):
-        os.makedirs(result_path)
-
     # get results
-    exec__(
-        ds=ds,
-        sd_model=sd_model,
-        sd_model_args=sd_model_args,
-        proj_model_args=proj_model_args,
-        result_path=result_path,
-    )
+    for ds in datasets:
+        for sd_model in sd_models:
+            # save results for specific dataset and specific synthetic data generating model
+            result_path = os.path.join("results", ds, sd_model)
+            if not os.path.exists(result_path):
+                os.makedirs(result_path)
+            exec__(
+                ds=ds,
+                sd_model=sd_model,
+                sd_model_args=sd_model_args,
+                proj_model_args=proj_model_args,
+                result_path=result_path,
+            )
