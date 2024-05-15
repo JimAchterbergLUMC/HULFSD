@@ -34,10 +34,13 @@ def sklearn_preprocessor(processor: str, data: pd.DataFrame, features: list):
     return data
 
 
-def sd_preprocess(X: pd.DataFrame, y: pd.Series, config: dict, random_state: int):
+def sd_pre_preprocess(X: pd.DataFrame, y: pd.Series, config: dict, random_state: int):
     # regular synthetic data requires only encoding, dropping, and train test split preprocessing (no one hot/normalizing)
 
     ds_name = config["name"]
+
+    X = X.copy()
+    y = y.copy()
 
     # dataset specific encoding
     if ds_name == "adult":
@@ -57,8 +60,48 @@ def sd_preprocess(X: pd.DataFrame, y: pd.Series, config: dict, random_state: int
     return X_train, X_test, y_train, y_test
 
 
+def sd_preprocess(
+    syn_X: pd.DataFrame,
+    real_X: pd.DataFrame,
+    syn_y: pd.Series,
+    config: dict,
+    random_state: int,
+):
+    ds_name = config["name"]
+    syn_X = syn_X.copy()
+    real_X = real_X.copy()
+    syn_y = syn_y.copy()
+
+    # one hot encode synthetic data together with real data for correct vocab
+    c_X = pd.concat([syn_X, real_X])
+    c_X = sklearn_preprocessor(
+        processor="one-hot", data=c_X, features=config["cat_features"]
+    )
+
+    # select only synthetic data for splitting and returning
+    syn_X = c_X[: syn_X.shape[0]]
+
+    # split train test
+    X_train, X_test, y_train, y_test = train_test_split(
+        syn_X, syn_y, stratify=syn_y, test_size=0.3, random_state=random_state
+    )
+
+    # normalize numericals
+    X_train = sklearn_preprocessor(
+        processor="normalize", data=X_train, features=config["num_features"]
+    )
+    X_test = sklearn_preprocessor(
+        processor="normalize", data=X_test, features=config["num_features"]
+    )
+
+    return X_train, X_test, y_train, y_test
+
+
 def preprocess(X: pd.DataFrame, y: pd.Series, config: dict, random_state: int):
     ds_name = config["name"]
+
+    X = X.copy()
+    y = y.copy()
 
     # dataset specific encoding
     if ds_name == "adult":
@@ -138,16 +181,17 @@ def decoding_onehot(df: pd.DataFrame, categorical_features: list):
 
 def postprocess_projections(data, config):
     """
-    Use some threshold (i.e. 0.5) to round, while ensuring multiclass features only get 1 feature instance.
+    Postprocess projections such that categories are integers instead of continuous.
+    Multiclass features get the highest column as feature instance, binary columns are rounded.
     """
     # [0,1] scale all data, then use a threshold for categoricals
+    data = data.copy()
+
     data = sklearn_preprocessor(
         processor="normalize",
         data=data,
         features=data.columns,
     )
-
-    data = data.copy()
 
     # store list of preprocessed names per categorical feature in a dictionary
     cat_features = config["cat_features"]
@@ -203,6 +247,8 @@ def decode_categorical_target(data: pd.DataFrame, target: str):
     If no target feature found, raise exception. If single target feature found, do nothing. If more than 1, decode to single feature and
     replace original one hot encoded features.
     """
+
+    data = data.copy()
 
     real_target = []
     for col in data.columns:

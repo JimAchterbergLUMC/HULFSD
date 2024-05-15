@@ -7,8 +7,6 @@ from sdv.single_table import (
 )
 from sdv.metadata import SingleTableMetadata
 import os
-
-os.environ["KERAS_BACKEND"] = "torch"
 import keras
 from keras import layers
 
@@ -27,6 +25,8 @@ def sdv_generate(
     """
     Generates tabular synthetic data using a specified model from the Synthetic Data Vault.
     """
+    X = X.copy()
+    y = y.copy()
     X = X.reset_index(drop=True)
     y = y.reset_index(drop=True)
     target = y.name
@@ -107,7 +107,9 @@ def fit_model(
         epochs=model_args["epochs"],
         validation_split=0.3,
         callbacks=[checkpoint_callback],
+        verbose=10,
     )
+
     model.load_weights(checkpoint_filepath)
 
     # fits model inplace, does not return anything
@@ -138,9 +140,9 @@ class Encoder(keras.models.Model):
         else:
             activation = "sigmoid"
 
-        reg = keras.regularizers.OrthogonalRegularizer(
-            factor=0.1,
-        )
+        # reg = keras.regularizers.OrthogonalRegularizer(
+        #     factor=0.1,
+        # )
 
         self.out = layers.Dense(
             self.output_dim,
@@ -202,7 +204,7 @@ class Encoder(keras.models.Model):
         for layer in self.layers:
             if isinstance(layer, layers.Dense):
                 # weights, bias = layer.get_weights()
-                weights = layer.get_weights()
+                weights = layer.get_weights()  # in case we dont use bias nodes
                 inv = np.squeeze(np.linalg.inv(weights))
                 inv_weights.append(inv)
                 # bias = -np.dot(bias.T, inv).T

@@ -5,11 +5,10 @@ import numpy as np
 from matplotlib import pyplot as plt
 import seaborn as sns
 from sklearn.manifold import TSNE
-from sklearn.naive_bayes import GaussianNB
-from sklearn.linear_model import LogisticRegression, Lasso
-from sklearn.ensemble import GradientBoostingClassifier
-from sklearn.svm import SVC
+from sklearn.linear_model import LogisticRegression, Lasso, SGDRegressor
+from sklearn.ensemble import GradientBoostingClassifier, GradientBoostingRegressor
 from skopt import BayesSearchCV
+from skopt.space import Real, Categorical, Integer
 
 
 def utility(
@@ -25,6 +24,7 @@ def utility(
     returns: lists of best models and corresponding best scores.
 
     """
+
     # infer datatype of target
     dt = preprocess.infer_data_type(y_train)
     assert dt in ["binary", "multiclass", "continuous"]
@@ -45,7 +45,8 @@ def utility(
             param_space=param_space,
             scoring=scoring,
         )
-        best_models.append(best_model)
+        # append not the fitted model instance, but the string of the name plus all hyperparameters
+        best_models.append(f"{best_model.__class__.__name__}_{best_model.get_params()}")
         best_scores.append(best_score)
 
     return best_models, best_scores
@@ -152,6 +153,7 @@ def get_projection_plot_(
             init="pca",
             perplexity=perplexity,
             verbose=0,
+            n_iter=1000,
         ).fit_transform(X)
     else:
         raise Exception("incorrect type of projection")
@@ -207,7 +209,9 @@ def get_column_plots_(
     Get plots of real data, regular synthetic data, and decoded synthetic projections.
     All columns are plotted in a single plot.
     """
-
+    real_data = real_data.copy()
+    regular_synthetic = regular_synthetic.copy()
+    decoded_synthetic = decoded_synthetic.copy()
     cat_features = config["cat_features"]
 
     # recode data back to original size (remove one hot encoding)
@@ -246,46 +250,53 @@ def get_column_plots_(
 
 def get_binary_models_():
     models = [
-        # GaussianNB(),
         LogisticRegression(solver="liblinear"),
-        # SVC(),
-        # GradientBoostingClassifier(),
+        # LogisticRegression(solver="liblinear"),
+        GradientBoostingClassifier(),
     ]
 
     param_search_spaces = [
-        # {"var_smoothing": [1e-9, 1e-6]},  # NB
-        {"penalty": ["l2", "l1"], "C": (1e-3, 1e6)},  # LR
-        # {
-        #     "kernel": [
-        #         "linear",
-        #         "poly",
-        #         "rbf",
-        #         "sigmoid",
-        #     ],
-        #     "C": (1e-6, 1e6),
-        #     "degree": (1, 10),
-        # },  # SVM
-        # {
-        #     "learning_rate": (1e-6, 1e-1),
-        #     "n_estimators": (1e0, 1e5),
-        #     "max_depth": (1e0, 1e2),
-        # },  # GB
+        {"penalty": Categorical(["l2", "l1"]), "C": Real(1e-3, 1e6)},  # LR
+        # {"penalty": Categorical(["l2", "l1"]), "C": Real(1e-3, 1e6)},
+        {
+            "learning_rate": Real(1e-6, 1e-1),
+            "n_estimators": Integer(1e0, 1e4),
+            "max_depth": Integer(1, 10),
+        },  # GB
     ]
     return models, param_search_spaces
 
 
 def get_multiclass_models_():
 
-    models = [LogisticRegression(multi_class="multinomial", solver="saga")]
-    param_search_spaces = [{"penalty": ["l2", "l1"], "C": (1e-3, 1e6)}]
+    models = [
+        LogisticRegression(multi_class="multinomial", solver="saga"),
+        GradientBoostingClassifier(),
+    ]
+
+    param_search_spaces = [
+        {"penalty": Categorical(["l2", "l1"]), "C": Real(1e-3, 1e6)},  # LR
+        {
+            "learning_rate": Real(1e-6, 1e-1),
+            "n_estimators": Integer(1e0, 1e4),
+            "max_depth": Integer(1, 10),
+        },  # GB
+    ]
 
     return models, param_search_spaces
 
 
 def get_regression_models_():
-
-    models = [Lasso(max_iter=1000)]
-    param_search_spaces = [{"alpha": (1e-3, 1e6)}]
+    # SGD regressor for same type of tuning as in classification
+    models = [SGDRegressor(), GradientBoostingRegressor()]
+    param_search_spaces = [
+        {"penalty": Categorical(["l2", "l1"]), "alpha": Real(1e-3, 1e6)},
+        {
+            "learning_rate": Real(1e-6, 1e-1),
+            "n_estimators": Integer(1e0, 1e4),
+            "max_depth": Integer(1, 10),
+        },  # GB
+    ]
 
     return models, param_search_spaces
 
@@ -316,15 +327,19 @@ def get_best_model_(
     scoring: str,
     cv: int = 3,
 ):
+    n_iter = 32
+    n_points = 4
+
     opt = BayesSearchCV(
         model,
         param_space,
-        n_iter=3,
+        n_iter=n_iter,
         cv=cv,
         scoring=scoring,
         random_state=0,
         verbose=0,
-        n_jobs=cv,
+        n_jobs=n_points * cv,
+        n_points=n_points,
         iid=False,
     )
     opt.fit(X_train, y_train)
