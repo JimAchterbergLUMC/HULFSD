@@ -39,9 +39,6 @@ def exec__(
     # setup data dictionary storing all data
     data = {}
 
-    # issue is: columns still contain strings instead of floats when passed to keras model
-    # - we passed one hot encoded (already processed) instead of the original dataset
-
     # fully preprocess real data
     print("preprocessing data")
     X_train, X_test, y_train, y_test = preprocess.preprocess(
@@ -87,7 +84,7 @@ def exec__(
     proj_model.compile(
         optimizer="adam",
         loss="binary_crossentropy",
-        metrics=["AUC"],
+        metrics=[sd.Keras_binary_MCC()],
     )
 
     sd.fit_model(
@@ -95,7 +92,7 @@ def exec__(
         X=data["real"][0],
         y=data["real"][2],
         model_args=proj_model_args,
-        monitor="val_AUC",
+        monitor="val_MCC",
     )
 
     encoder, predictor = proj_model.encoder, proj_model.predictor
@@ -180,7 +177,7 @@ def exec__(
     # find privacy
     print("getting attribute inference")
     aia = inference.get_attribute_inference_(
-        data=data, sd_sets=["regular_synthetic"], config=config
+        data=data, sd_sets=["regular_synthetic", "synthetic_decoded"], config=config
     )
     aia.to_csv(os.path.join(result_path, "attribute_inference.csv"), sep="\t")
     print("getting authenticity")
@@ -192,32 +189,28 @@ def exec__(
 
 
 if __name__ == "__main__":
-    # dont forget to set args for:
-    # - projection model, tsne, sd model, bayesCV
-    # the real time consumer seems to be bayesCV...
-    # so we should focus our efforts on massively parallelizing that over parallelizing the different sd models
     datasets = ["adult"]
     sd_models = ["copula", "vae", "gan"]
     sd_model_args = {}
-    proj_model_args = {"epochs": 100, "batch_size": 512}
+    proj_model_args = {"epochs": 300, "batch_size": 512}
 
     # get results
     for ds in datasets:
-        # for sd_model in sd_models:
-        #     exec__(
-        #         sd_model=sd_model,
-        #         ds=ds,
-        #         sd_model_args=sd_model_args,
-        #         proj_model_args=proj_model_args,
-        #     )
-        Parallel(
-            n_jobs=-1,
-        )(
-            delayed(exec__)(
+        for sd_model in sd_models:
+            exec__(
                 sd_model=sd_model,
                 ds=ds,
                 sd_model_args=sd_model_args,
                 proj_model_args=proj_model_args,
             )
-            for sd_model in sd_models
-        )
+        # Parallel(
+        #     n_jobs=-1,
+        # )(
+        #     delayed(exec__)(
+        #         sd_model=sd_model,
+        #         ds=ds,
+        #         sd_model_args=sd_model_args,
+        #         proj_model_args=proj_model_args,
+        #     )
+        #     for sd_model in sd_models
+        # )

@@ -107,7 +107,6 @@ def fit_model(
         epochs=model_args["epochs"],
         validation_split=0.3,
         callbacks=[checkpoint_callback],
-        verbose=10,
     )
 
     model.load_weights(checkpoint_filepath)
@@ -252,3 +251,57 @@ class EncoderModel(keras.models.Model):
         proj = self.encoder(inputs)
         pred = self.predictor(proj)
         return pred
+
+
+class Keras_binary_MCC(keras.metrics.Metric):
+
+    def __init__(self, name="MCC"):
+        super().__init__(name=name)
+        self.tp = self.add_weight(name="tp", initializer="zeros")
+        self.tn = self.add_weight(name="tn", initializer="zeros")
+        self.fp = self.add_weight(name="fp", initializer="zeros")
+        self.fn = self.add_weight(name="fn", initializer="zeros")
+
+    def update_state(self, y_true, y_pred, sample_weight=None):
+        # get predictions and values as booleans
+        y_pred = keras.ops.round(y_pred)
+        y_true = keras.ops.cast(y_true, "bool")
+        y_pred = keras.ops.cast(y_pred, "bool")
+
+        # find values for tp, tn, fp,fn
+        tp_vals = keras.ops.logical_and(
+            keras.ops.equal(y_true, True), keras.ops.equal(y_pred, True)
+        )
+        self.tp.assign_add(keras.ops.sum(tp_vals))
+
+        tn_vals = keras.ops.logical_and(
+            keras.ops.equal(y_true, False), keras.ops.equal(y_pred, False)
+        )
+        self.tn.assign_add(keras.ops.sum(tn_vals))
+
+        fp_vals = keras.ops.logical_and(
+            keras.ops.equal(y_true, False), keras.ops.equal(y_pred, True)
+        )
+        self.fp.assign_add(keras.ops.sum(fp_vals))
+
+        fn_vals = keras.ops.logical_and(
+            keras.ops.equal(y_true, True), keras.ops.equal(y_pred, False)
+        )
+        self.fn.assign_add(keras.ops.sum(fn_vals))
+
+    def result(self):
+        num = (self.tp * self.tn) - (self.fp * self.fn)
+        denom = keras.ops.sqrt(
+            (self.tp + self.fp)
+            * (self.tp + self.fn)
+            * (self.tn + self.fp)
+            * (self.tn + self.fn)
+        )
+        result = num / denom
+        return result
+
+    def reset_states(self):
+        self.tp.assign(0)
+        self.tn.assign(0)
+        self.fp.assign(0)
+        self.fn.assign(0)

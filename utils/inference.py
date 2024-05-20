@@ -5,10 +5,22 @@ import numpy as np
 from matplotlib import pyplot as plt
 import seaborn as sns
 from sklearn.manifold import TSNE
-from sklearn.linear_model import LogisticRegression, Lasso, SGDRegressor
-from sklearn.ensemble import GradientBoostingClassifier, GradientBoostingRegressor
+from sklearn.metrics import make_scorer, matthews_corrcoef
+from sklearn.linear_model import LogisticRegression, Ridge
+from sklearn.ensemble import (
+    GradientBoostingClassifier,
+    GradientBoostingRegressor,
+    RandomForestClassifier,
+    RandomForestRegressor,
+)
 from skopt import BayesSearchCV
 from skopt.space import Real, Categorical, Integer
+
+# filter out convergence warnings
+import warnings
+from sklearn.exceptions import ConvergenceWarning
+
+warnings.filterwarnings(action="ignore", category=ConvergenceWarning)
 
 
 def utility(
@@ -35,7 +47,7 @@ def utility(
 
     # for the different types of models, find the best hyperparameters and return score on a test set
     for model, param_space in zip(models, param_search_spaces):
-
+        print(f"we are now at model: {model}")
         best_model, best_score = get_best_model_(
             X_train=X_train,
             X_test=X_test,
@@ -140,18 +152,20 @@ def plot_dataframe(df: pd.DataFrame, ncols: int, rotate_labels: bool):
 
 
 def get_projection_plot_(
-    real: pd.DataFrame, synthetic: pd.DataFrame, type: str = "tsne"
+    real: pd.DataFrame,
+    synthetic: pd.DataFrame,
+    type: str = "tsne",
+    n_neighbours: int = 35,
 ):
     X = pd.concat([real, synthetic], axis=0)
     X = X.reset_index(drop=True)
-    perplexity = 35
 
     if type == "tsne":
         emb = TSNE(
             n_components=2,
             learning_rate="auto",
             init="pca",
-            perplexity=perplexity,
+            perplexity=n_neighbours,
             verbose=0,
             n_iter=1000,
         ).fit_transform(X)
@@ -176,7 +190,7 @@ def get_projection_plot_(
     emb.columns = ["comp1", "comp2", "labels"]
     plt.figure(figsize=(10, 6))
     sns.scatterplot(data=emb, x="comp1", y="comp2", hue="labels", alpha=0.1)
-    plt.title(f"tSNE plot ({perplexity} perplexity)", fontsize=11)
+    plt.title(f"tSNE plot ({n_neighbours} perplexity)", fontsize=11)
     plt.tight_layout()
     return plt
 
@@ -188,6 +202,7 @@ def get_utility_(data: dict):
     """
     output = []
     for name, (X_tr, X_te, y_tr, y_te) in data.items():
+        print(f"we are at subdataset: {name}")
         best_models, best_scores = utility(X_tr, X_te, y_tr, y_te)
         names = np.repeat(name, len(best_models))
         res = np.column_stack((names, best_models, best_scores))
@@ -250,19 +265,26 @@ def get_column_plots_(
 
 def get_binary_models_():
     models = [
-        LogisticRegression(solver="liblinear"),
+        LogisticRegression(solver="saga", penalty="l2"),
         # LogisticRegression(solver="liblinear"),
-        GradientBoostingClassifier(),
+        # GradientBoostingClassifier(),
+        RandomForestClassifier(n_jobs=-1),
     ]
 
     param_search_spaces = [
-        {"penalty": Categorical(["l2", "l1"]), "C": Real(1e-3, 1e6)},  # LR
-        # {"penalty": Categorical(["l2", "l1"]), "C": Real(1e-3, 1e6)},
         {
-            "learning_rate": Real(1e-6, 1e-1),
-            "n_estimators": Integer(1e0, 1e4),
-            "max_depth": Integer(1, 10),
-        },  # GB
+            "C": Real(1e-3, 1e3),
+        },  # LR
+        # {"penalty": Categorical(["l2", "l1"]), "C": Real(1e-3, 1e6)},
+        # {
+        #     "learning_rate": Real(1e-4, 1e-1),
+        #     "n_estimators": Integer(1e0, 1e3),
+        #     "max_depth": Integer(1, 10),
+        # },  # GB
+        {
+            "n_estimators": Integer(1e0, 1e3),
+            "max_depth": Integer(1, 25),
+        },  # RF
     ]
     return models, param_search_spaces
 
@@ -270,17 +292,24 @@ def get_binary_models_():
 def get_multiclass_models_():
 
     models = [
-        LogisticRegression(multi_class="multinomial", solver="saga"),
-        GradientBoostingClassifier(),
+        LogisticRegression(multi_class="multinomial", solver="saga", penalty="l2"),
+        # GradientBoostingClassifier(),
+        RandomForestClassifier(n_jobs=-1),
     ]
 
     param_search_spaces = [
-        {"penalty": Categorical(["l2", "l1"]), "C": Real(1e-3, 1e6)},  # LR
         {
-            "learning_rate": Real(1e-6, 1e-1),
-            "n_estimators": Integer(1e0, 1e4),
-            "max_depth": Integer(1, 10),
-        },  # GB
+            "C": Real(1e-3, 1e3),
+        },  # LR
+        # {
+        #     "learning_rate": Real(1e-4, 1e-1),
+        #     "n_estimators": Integer(1e0, 1e3),
+        #     "max_depth": Integer(1, 10),
+        # },  # GB
+        {
+            "n_estimators": Integer(1e0, 1e3),
+            "max_depth": Integer(1, 25),
+        },  # RF
     ]
 
     return models, param_search_spaces
@@ -288,14 +317,24 @@ def get_multiclass_models_():
 
 def get_regression_models_():
     # SGD regressor for same type of tuning as in classification
-    models = [SGDRegressor(), GradientBoostingRegressor()]
+    models = [
+        Ridge(solver="saga"),
+        # GradientBoostingRegressor()
+        RandomForestRegressor(n_jobs=-1),
+    ]
     param_search_spaces = [
-        {"penalty": Categorical(["l2", "l1"]), "alpha": Real(1e-3, 1e6)},
         {
-            "learning_rate": Real(1e-6, 1e-1),
-            "n_estimators": Integer(1e0, 1e4),
-            "max_depth": Integer(1, 10),
-        },  # GB
+            "alpha": Real(1e-3, 1e3),
+        },
+        # {
+        #     "learning_rate": Real(1e-4, 1e-1),
+        #     "n_estimators": Integer(1e0, 1e3),
+        #     "max_depth": Integer(1, 10),
+        # },  # GB
+        {
+            "n_estimators": Integer(1e0, 1e3),
+            "max_depth": Integer(1, 25),
+        },  # RF
     ]
 
     return models, param_search_spaces
@@ -306,13 +345,13 @@ def get_pred_models_(dt):
     # get list of models
     if dt == "binary":
         models, param_search_spaces = get_binary_models_()
-        scoring = "roc_auc"
+        scoring = make_scorer(matthews_corrcoef)
     elif dt == "multiclass":
         models, param_search_spaces = get_multiclass_models_()
-        scoring = "accuracy"
+        scoring = make_scorer(matthews_corrcoef)
     elif dt == "continuous":
         models, param_search_spaces = get_regression_models_()
-        scoring = "neg_mean_squared_error"
+        scoring = "neg_root_mean_squared_error"
 
     return models, param_search_spaces, scoring
 
@@ -324,11 +363,12 @@ def get_best_model_(
     y_test: pd.Series,
     model: any,
     param_space: dict,
-    scoring: str,
-    cv: int = 3,
+    scoring: any,
 ):
+    cv = 3
     n_iter = 32
-    n_points = 4
+    n_points = 3
+    n_jobs = int(n_points * cv)
 
     opt = BayesSearchCV(
         model,
@@ -338,9 +378,8 @@ def get_best_model_(
         scoring=scoring,
         random_state=0,
         verbose=0,
-        n_jobs=n_points * cv,
+        n_jobs=n_jobs,
         n_points=n_points,
-        iid=False,
     )
     opt.fit(X_train, y_train)
     return opt.best_estimator_, opt.score(X_test, y_test)
@@ -362,6 +401,7 @@ def get_attribute_inference_(
     sensitive_fields = config["sensitive_fields"]
     for name, (X_tr, X_te, y_tr, y_te) in data.items():
         if name in sd_sets:
+            print(f"we are at subdataset: {name}")
             for sensitive_field in sensitive_fields:
                 # decode sensitive target to single feature if one hot encoded
                 rd = preprocess.decode_categorical_target(
@@ -409,6 +449,7 @@ def get_authenticity_(data: pd.DataFrame, sd_sets: list = [], real_key: str = "r
     real_data = data[real_key][0]
     for name, (X_tr, _, _, _) in data.items():
         if name in sd_sets:
+            print(f"we are at subdataset: {name}")
             score = authenticity(
                 real_data=real_data, synthetic_data=X_tr, metric="euclidean"
             )
