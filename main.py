@@ -174,7 +174,7 @@ def exec__(
         )
         print(f"getting authenticity for fold: {fold} and sd model: {sd_model}")
         auth = inference.get_authenticity_(
-            data=data, config=config, sd_sets=["Regular Synthetic", "Synthetic Decoded"]
+            data=data, sd_sets=["Regular Synthetic", "Synthetic Decoded"]
         )
         # update output stats tables with results from this fold
         if fold == 0:
@@ -182,7 +182,7 @@ def exec__(
             ut_stats = inference.RunningStats(df=utility)
             aia_stats = inference.RunningStats(df=aia)
             auth_stats = inference.RunningStats(df=auth)
-        # ut_stats.update(utility)
+        ut_stats.update(utility)
         aia_stats.update(aia)
         auth_stats.update(auth)
         # during each fold write stats tables to csv to see current outputs

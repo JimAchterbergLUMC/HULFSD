@@ -186,17 +186,20 @@ def get_projection_plot_(
 
 class RunningStats:
 
-    # TBD: ensure it works on dataframe, series, or scalar
-    def __init__(self, df):
+    def __init__(self, df=None):
         self.df = df
         self.n = 0
-        self.mean = df
-        self.mean = self.mean * 0
-        self.M2 = df
-        self.M2 = self.M2 * 0
+        if df is not None:
+            self.mean = df
+            self.mean = self.mean * 0
+            self.M2 = df
+            self.M2 = self.M2 * 0
+        else:
+            self.mean = 0
+            self.M2 = 0
 
     def update(self, x):
-        # x is a pandas df
+        # x is a pandas df/series or scalar
         self.n += 1
         delta = x - self.mean
         self.mean += delta / self.n
@@ -207,9 +210,19 @@ class RunningStats:
     def variance(self):
         if self.n < 2:
             # return NaNs if n less than two
-            out = np.empty(shape=(self.df.shape))
-            out[:] = np.nan
-            out = pd.DataFrame(out)
+            if self.df is not None:
+                out = np.empty(shape=(self.df.shape))
+                out[:] = np.nan
+                if isinstance(self.df, pd.DataFrame):
+                    out = pd.DataFrame(out)
+                elif isinstance(self.df, pd.Series):
+                    out = pd.Series(out)
+                else:
+                    raise Exception(
+                        "only pandas DF, pandas Series or None (scalar) supported"
+                    )
+            else:
+                out = np.nan
             return out
         return self.M2 / (self.n - 1)
 
