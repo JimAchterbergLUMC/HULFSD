@@ -5,22 +5,15 @@ import numpy as np
 from matplotlib import pyplot as plt
 import seaborn as sns
 from sklearn.manifold import TSNE
-from sklearn.metrics import make_scorer, matthews_corrcoef
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.ensemble import (
     GradientBoostingClassifier,
     GradientBoostingRegressor,
-    RandomForestClassifier,
-    RandomForestRegressor,
 )
-from skopt import BayesSearchCV
-from skopt.space import Real, Categorical, Integer
 
-# filter out convergence warnings
-import warnings
-from sklearn.exceptions import ConvergenceWarning
-
-warnings.filterwarnings(action="ignore", category=ConvergenceWarning)
+# from skopt import BayesSearchCV
+# from skopt.space import Real, Categorical, Integer
+from sklearn.model_selection import GridSearchCV
 
 
 def utility(
@@ -43,11 +36,9 @@ def utility(
 
     models, param_search_spaces, scoring = get_pred_models_(dt=dt)
 
-    best_models, best_scores = [], []
-
+    output = {}
     # for the different types of models, find the best hyperparameters and return score on a test set
     for model, param_space in zip(models, param_search_spaces):
-        print(f"we are now at model: {model}")
         best_model, best_score = get_best_model_(
             X_train=X_train,
             X_test=X_test,
@@ -57,11 +48,9 @@ def utility(
             param_space=param_space,
             scoring=scoring,
         )
-        # append not the fitted model instance, but the string of the name plus all hyperparameters
-        best_models.append(f"{best_model.__class__.__name__}_{best_model.get_params()}")
-        best_scores.append(best_score)
+        output[best_model.__class__.__name__] = best_score
 
-    return best_models, best_scores
+    return output
 
 
 def attribute_inference(
@@ -77,13 +66,13 @@ def attribute_inference(
     # key fields are all fields except for the sensitive field
     key_fields = [x for x in real_data.columns if x != sensitive_field]
 
-    best_models, best_scores = utility(
+    output = utility(
         X_train=synthetic_data[key_fields],
         X_test=real_data[key_fields],
         y_train=synthetic_data[sensitive_field],
         y_test=real_data[sensitive_field],
     )
-    return best_models, best_scores
+    return output
 
 
 def authenticity(
@@ -195,68 +184,62 @@ def get_projection_plot_(
     return plt
 
 
-def get_utility_(data: dict):
-    """
-    Retrieves utility scores for a dictionary of datasets and formats output. Dictionary of datasets is in the format:
-    key:[X_train,X_test,y_train,y_test]. See utility() function for what utility score means.
-    """
-    output = []
-    for name, (X_tr, X_te, y_tr, y_te) in data.items():
-        print(f"we are at subdataset: {name}")
-        best_models, best_scores = utility(X_tr, X_te, y_tr, y_te)
-        names = np.repeat(name, len(best_models))
-        res = np.column_stack((names, best_models, best_scores))
-        result = pd.DataFrame(res, columns=["dataset", "best models", "best scores"])
-        if isinstance(output, pd.DataFrame):
-            output = pd.concat([output, result], ignore_index=True)
-        else:
-            output = result.copy()
-    return output
+class RunningStats:
+
+    # TBD: ensure it works on dataframe, series, or scalar
+    def __init__(self, df):
+        self.df = df
+        self.n = 0
+        self.mean = df
+        self.mean = self.mean * 0
+        self.M2 = df
+        self.M2 = self.M2 * 0
+
+    def update(self, x):
+        # x is a pandas df
+        self.n += 1
+        delta = x - self.mean
+        self.mean += delta / self.n
+        delta2 = x - self.mean
+        self.M2 += delta * delta2
+
+    @property
+    def variance(self):
+        if self.n < 2:
+            # return NaNs if n less than two
+            out = np.empty(shape=(self.df.shape))
+            out[:] = np.nan
+            out = pd.DataFrame(out)
+            return out
+        return self.M2 / (self.n - 1)
+
+    @property
+    def standard_deviation(self):
+        return np.sqrt(self.variance)
+
+    @property
+    def mean_value(self):
+        return self.mean
 
 
 def get_column_plots_(
-    real_data: pd.DataFrame,
-    regular_synthetic: pd.DataFrame,
-    decoded_synthetic: pd.DataFrame,
+    data: dict,
     config: dict,
 ):
     """
     Get plots of real data, regular synthetic data, and decoded synthetic projections.
     All columns are plotted in a single plot.
     """
-    real_data = real_data.copy()
-    regular_synthetic = regular_synthetic.copy()
-    decoded_synthetic = decoded_synthetic.copy()
-    cat_features = config["cat_features"]
 
-    # recode data back to original size (remove one hot encoding)
-    real_data = preprocess.decoding_onehot(real_data, cat_features)
-    regular_synthetic = preprocess.decoding_onehot(regular_synthetic, cat_features)
-    decoded_synthetic = preprocess.decoding_onehot(decoded_synthetic, cat_features)
-
-    # remove feature string from categories to shorten categories for plotting
-    def remove_feature_str(cat):
-        keep = cat.split("_")[1:]
-        return "_".join(keep)
-
-    real_data = real_data.map(
-        lambda x: remove_feature_str(x) if isinstance(x, str) else x
-    )
-    regular_synthetic = regular_synthetic.map(
-        lambda x: remove_feature_str(x) if isinstance(x, str) else x
-    )
-    decoded_synthetic = decoded_synthetic.map(
-        lambda x: remove_feature_str(x) if isinstance(x, str) else x
-    )
-
-    # concatenate dataframes with a hue column for easy plotting in same figure
-    full_df = pd.concat(
-        [
-            real_data.assign(dataset="Real"),
-            regular_synthetic.assign(dataset="Regular Synthetic"),
-            decoded_synthetic.assign(dataset="Decoded Synthetic"),
-        ]
-    )
+    # collapse one hot encoded data back to single columns
+    full_df = []
+    for name, (X_tr, _, _, _) in data.items():
+        full_df.append(
+            (preprocess.collapse_onehot(X_tr, config["cat_features"])).assign(
+                dataset=name
+            )
+        )
+    full_df = pd.concat(full_df)
 
     plot = plot_dataframe(df=full_df, ncols=2, rotate_labels=True)
 
@@ -267,24 +250,38 @@ def get_binary_models_():
     models = [
         LogisticRegression(solver="saga", penalty="l2"),
         # LogisticRegression(solver="liblinear"),
-        # GradientBoostingClassifier(),
-        RandomForestClassifier(n_jobs=-1),
+        GradientBoostingClassifier(),
+        # RandomForestClassifier(n_jobs=-1),
     ]
+
+    # param_search_spaces = [
+    #     {
+    #         "C": Real(1e-3, 1e3),
+    #     },  # LR
+    #     # {"penalty": Categorical(["l2", "l1"]), "C": Real(1e-3, 1e6)},
+    #     {
+    #         "n_estimators": Integer(1e0, 1e2),
+    #         "max_depth": Integer(1, 10),
+    #     },  # GB
+    #     # {
+    #     #     "n_estimators": Integer(1e0, 1e3),
+    #     #     "max_depth": Integer(1, 25),
+    #     # },  # RF
+    # ]
 
     param_search_spaces = [
         {
-            "C": Real(1e-3, 1e3),
+            "C": np.logspace(-3, 3, 7),
         },  # LR
         # {"penalty": Categorical(["l2", "l1"]), "C": Real(1e-3, 1e6)},
-        # {
-        #     "learning_rate": Real(1e-4, 1e-1),
-        #     "n_estimators": Integer(1e0, 1e3),
-        #     "max_depth": Integer(1, 10),
-        # },  # GB
         {
-            "n_estimators": Integer(1e0, 1e3),
-            "max_depth": Integer(1, 25),
-        },  # RF
+            "n_estimators": [10, 50, 100],
+            "max_depth": [1, 5, 10],
+        },  # GB
+        # {
+        #     "n_estimators": Integer(1e0, 1e3),
+        #     "max_depth": Integer(1, 25),
+        # },  # RF
     ]
     return models, param_search_spaces
 
@@ -293,48 +290,75 @@ def get_multiclass_models_():
 
     models = [
         LogisticRegression(multi_class="multinomial", solver="saga", penalty="l2"),
-        # GradientBoostingClassifier(),
-        RandomForestClassifier(n_jobs=-1),
+        GradientBoostingClassifier(),
+        # RandomForestClassifier(n_jobs=-1),
     ]
+
+    # param_search_spaces = [
+    #     {
+    #         "C": Real(1e-3, 1e3),
+    #     },  # LR
+    #     {
+    #         "n_estimators": Integer(1e0, 1e2),
+    #         "max_depth": Integer(1, 10),
+    #     },  # GB
+    #     # {
+    #     #     "n_estimators": Integer(1e0, 1e3),
+    #     #     "max_depth": Integer(1, 25),
+    #     # },  # RF
+    # ]
 
     param_search_spaces = [
         {
-            "C": Real(1e-3, 1e3),
+            "C": np.logspace(-3, 3, 7),
         },  # LR
-        # {
-        #     "learning_rate": Real(1e-4, 1e-1),
-        #     "n_estimators": Integer(1e0, 1e3),
-        #     "max_depth": Integer(1, 10),
-        # },  # GB
+        # {"penalty": Categorical(["l2", "l1"]), "C": Real(1e-3, 1e6)},
         {
-            "n_estimators": Integer(1e0, 1e3),
-            "max_depth": Integer(1, 25),
-        },  # RF
+            "n_estimators": [10, 50, 100],
+            "max_depth": [1, 5, 10],
+        },  # GB
+        # {
+        #     "n_estimators": Integer(1e0, 1e3),
+        #     "max_depth": Integer(1, 25),
+        # },  # RF
     ]
 
     return models, param_search_spaces
 
 
 def get_regression_models_():
-    # SGD regressor for same type of tuning as in classification
     models = [
         Ridge(solver="saga"),
-        # GradientBoostingRegressor()
-        RandomForestRegressor(n_jobs=-1),
+        GradientBoostingRegressor(),
+        # RandomForestRegressor(n_jobs=-1),
     ]
+    # param_search_spaces = [
+    #     {
+    #         "alpha": Real(1e-3, 1e3),
+    #     },
+    #     {
+    #         "n_estimators": Integer(1e0, 1e2),
+    #         "max_depth": Integer(1, 10),
+    #     },  # GB
+    #     # {
+    #     #     "n_estimators": Integer(1e0, 1e3),
+    #     #     "max_depth": Integer(1, 25),
+    #     # },  # RF
+    # ]
+
     param_search_spaces = [
         {
-            "alpha": Real(1e-3, 1e3),
-        },
-        # {
-        #     "learning_rate": Real(1e-4, 1e-1),
-        #     "n_estimators": Integer(1e0, 1e3),
-        #     "max_depth": Integer(1, 10),
-        # },  # GB
+            "alpha": np.logspace(-3, 3, 7),
+        },  # LR
+        # {"penalty": Categorical(["l2", "l1"]), "C": Real(1e-3, 1e6)},
         {
-            "n_estimators": Integer(1e0, 1e3),
-            "max_depth": Integer(1, 25),
-        },  # RF
+            "n_estimators": [10, 50, 100],
+            "max_depth": [1, 5, 10],
+        },  # GB
+        # {
+        #     "n_estimators": Integer(1e0, 1e3),
+        #     "max_depth": Integer(1, 25),
+        # },  # RF
     ]
 
     return models, param_search_spaces
@@ -345,10 +369,11 @@ def get_pred_models_(dt):
     # get list of models
     if dt == "binary":
         models, param_search_spaces = get_binary_models_()
-        scoring = make_scorer(matthews_corrcoef)
+        scoring = "roc_auc"
     elif dt == "multiclass":
         models, param_search_spaces = get_multiclass_models_()
-        scoring = make_scorer(matthews_corrcoef)
+        # scoring = make_scorer(matthews_corrcoef)
+        scoring = "roc_auc_ovr"
     elif dt == "continuous":
         models, param_search_spaces = get_regression_models_()
         scoring = "neg_root_mean_squared_error"
@@ -370,23 +395,46 @@ def get_best_model_(
     n_points = 3
     n_jobs = int(n_points * cv)
 
-    opt = BayesSearchCV(
+    # opt = BayesSearchCV(
+    #     model,
+    #     param_space,
+    #     n_iter=n_iter,
+    #     cv=cv,
+    #     scoring=scoring,
+    #     random_state=0,
+    #     verbose=0,
+    #     n_jobs=n_jobs,
+    #     n_points=n_points,
+    # )
+
+    opt = GridSearchCV(
         model,
         param_space,
-        n_iter=n_iter,
         cv=cv,
         scoring=scoring,
-        random_state=0,
         verbose=0,
-        n_jobs=n_jobs,
-        n_points=n_points,
+        n_jobs=-1,
     )
+
     opt.fit(X_train, y_train)
     return opt.best_estimator_, opt.score(X_test, y_test)
 
 
+def get_utility_(data: dict):
+    """
+    Retrieves utility scores for a dictionary of datasets and formats output. Dictionary of datasets is in the format:
+    key:[X_train,X_test,y_train,y_test]. See utility() function for what utility score means.
+    """
+    output = {}
+    for name, (X_tr, X_te, y_tr, y_te) in data.items():
+        # set dictionary for specific dataset with dictionary of model:testscore
+        output[name] = utility(X_tr, X_te, y_tr, y_te)
+    output = pd.DataFrame(output)
+    return output
+
+
 def get_attribute_inference_(
-    data: pd.DataFrame, config: dict, sd_sets: list = [], real_key: str = "real"
+    data: pd.DataFrame, config: dict, sd_sets: list = [], real_key: str = "Real"
 ):
     """
     Retrieves attribute inference scores for a dictionary of datasets and formats output. Dictionary of datasets is in the format:
@@ -396,46 +444,39 @@ def get_attribute_inference_(
     real_key: key which denotes the real dataset (and thus used to test attribute inference models)
 
     """
-    output = []
-    real_data = data[real_key][0]
+    output = {}
     sensitive_fields = config["sensitive_fields"]
     for name, (X_tr, X_te, y_tr, y_te) in data.items():
         if name in sd_sets:
-            print(f"we are at subdataset: {name}")
+            att = {}
             for sensitive_field in sensitive_fields:
                 # decode sensitive target to single feature if one hot encoded
-                rd = preprocess.decode_categorical_target(
-                    data=real_data, target=sensitive_field
-                )
-                sd = preprocess.decode_categorical_target(
-                    data=X_tr, target=sensitive_field
-                )
 
-                best_models, best_scores = attribute_inference(
+                rd = data[real_key][0].copy()
+                sd = X_tr.copy()
+                if sensitive_field in config["cat_features"]:
+                    rd = preprocess.collapse_onehot(
+                        df=rd, categorical_features=[sensitive_field]
+                    )
+                    sd = preprocess.collapse_onehot(
+                        df=sd, categorical_features=[sensitive_field]
+                    )
+
+                atr = attribute_inference(
                     real_data=rd,
                     synthetic_data=sd,
                     sensitive_field=sensitive_field,
                 )
-                names = np.repeat(name, len(best_models))
-                fields = np.repeat(sensitive_field, len(best_models))
-                res = np.column_stack((names, fields, best_models, best_scores))
-                result = pd.DataFrame(
-                    res,
-                    columns=[
-                        "dataset",
-                        "sensitive target feature",
-                        "best models",
-                        "best scores",
-                    ],
-                )
-                if isinstance(output, pd.DataFrame):
-                    output = pd.concat([output, result], ignore_index=True)
-                else:
-                    output = result.copy()
+                att[sensitive_field] = atr
+            output[name] = att
+
+    # flatten the three-layer dictionary
+    output = {key: preprocess.flatten_dict(value) for key, value in output.items()}
+    output = pd.DataFrame(output)
     return output
 
 
-def get_authenticity_(data: pd.DataFrame, sd_sets: list = [], real_key: str = "real"):
+def get_authenticity_(data: pd.DataFrame, sd_sets: list = [], real_key: str = "Real"):
     """
     Retrieves authenticity scores for a dictionary of datasets and formats output. Dictionary of datasets is in the format:
     key:[X_train,X_test,y_train,y_test]. See authenticity() function for what authenticity score means.
@@ -445,19 +486,13 @@ def get_authenticity_(data: pd.DataFrame, sd_sets: list = [], real_key: str = "r
 
     """
 
-    output = []
-    real_data = data[real_key][0]
+    output = {}
     for name, (X_tr, _, _, _) in data.items():
         if name in sd_sets:
-            print(f"we are at subdataset: {name}")
-            score = authenticity(
-                real_data=real_data, synthetic_data=X_tr, metric="euclidean"
+            output[name] = authenticity(
+                real_data=data[real_key][0].copy(),
+                synthetic_data=X_tr.copy(),
+                metric="euclidean",
             )
-            result = pd.DataFrame(
-                np.array([[name], [score]]).T, index=[0], columns=["dataset", "scores"]
-            )
-            if isinstance(output, pd.DataFrame):
-                output = pd.concat([output, result], ignore_index=True)
-            else:
-                output = result.copy()
+    output = pd.DataFrame(output)
     return output
