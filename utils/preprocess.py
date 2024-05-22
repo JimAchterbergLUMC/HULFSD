@@ -13,9 +13,14 @@ def preprocess(X, y, config):
     # turn numericals into floats
     X[config["num_features"]] = X[config["num_features"]].astype(float)
 
+    # turn categoricals into strings
+    X[config["cat_features"]] = X[config["cat_features"]].astype(str)
+
     # encode
     if config["name"] == "adult":
         X, y = preprocess_adult(X=X, y=y)
+    elif config["name"] == "credit":
+        X, y = preprocess_credit(X=X, y=y)
 
     return X, y
 
@@ -161,6 +166,15 @@ def preprocess_adult(X, y):
         "Other"
     )
 
+    return X, y
+
+
+def preprocess_credit(X, y):
+    y = y.copy()
+    if isinstance(y, pd.DataFrame):
+        y = y.Y
+
+    # we dont do any encoding
     return X, y
 
 

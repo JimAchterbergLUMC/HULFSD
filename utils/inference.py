@@ -180,6 +180,9 @@ def get_projection_plot_(
     plt.figure(figsize=(10, 6))
     sns.scatterplot(data=emb, x="comp1", y="comp2", hue="labels", alpha=0.1)
     plt.title(f"tSNE plot ({n_neighbours} perplexity)", fontsize=11)
+    legend = plt.legend(fontsize=11)
+    for legend_handle in legend.legend_handles:
+        legend_handle.set_alpha(1)
     plt.tight_layout()
     return plt
 
@@ -507,5 +510,5 @@ def get_authenticity_(data: pd.DataFrame, sd_sets: list = [], real_key: str = "R
                 synthetic_data=X_tr.copy(),
                 metric="euclidean",
             )
-    output = pd.DataFrame(output)
+    output = pd.DataFrame(output, index=[0])
     return output

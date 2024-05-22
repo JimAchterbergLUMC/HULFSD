@@ -35,10 +35,40 @@
         "drop_features": []
     },
     "credit": {
+        "name": "credit",
         "id": 350,
-        "cat_features": [],
-        "num_features": [],
-        "drop_features": []
+        "cat_features": [
+            "X2",
+            "X3",
+            "X4",
+            "X6",
+            "X7",
+            "X8",
+            "X9",
+            "X10",
+            "X11"
+        ],
+        "num_features": [
+            "X1",
+            "X5",
+            "X12",
+            "X13",
+            "X14",
+            "X15",
+            "X16",
+            "X17",
+            "X18",
+            "X19",
+            "X20",
+            "X21",
+            "X22",
+            "X23"
+        ],
+        "drop_features": [],
+        "sensitive_fields": [
+            "X5",
+            "X2"
+        ]
     },
     "shopping": {
         "id": 468,

@@ -39,9 +39,7 @@ def exec__(
     X, y = preprocess.preprocess(X, y, config)
 
     # make k splits
-    cv = StratifiedKFold(
-        n_splits=n_splits,
-    )
+    cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
     for fold, (train, test) in enumerate(cv.split(X, y)):
 
         # real data: one hot encode (together) and normalize (separately)
@@ -88,10 +86,15 @@ def exec__(
         )
         data["Regular Synthetic"] = [
             X_tr.copy(),
-            X_te.copy(),
+            data["Real"][1].copy(),
             syn_y.iloc[train].copy(),
-            syn_y.iloc[test].copy(),
+            data["Real"][3].copy(),
         ]
+
+        # issue is: some features are in synthetic train, but not in real test!
+        # issue is: these features do not exist in one hot encoded real data
+        # and also not in the original data! so these should not exist in the synthetic data
+        # i think the issue is that SDV is recognizing as integer not categorical value, so we need to cast cast cast!
 
         # synthetic decoded projections: instantiate, compile, train, get encoder, project, generate synthetic, split, flip, decode synthetic, normalize and cast to categoricals
         print(
@@ -137,12 +140,14 @@ def exec__(
         X_tr = pd.DataFrame(
             decoder.predict(syn_X.iloc[train]), columns=data["Real"][0].columns
         )
+
+        # instead of postprocess, maybe just: normalize numericals, collapse categoricals, then one hot encode categoricals again
         X_tr = preprocess.postprocess_projections(data=X_tr, config=config)
         data["Synthetic Decoded"] = [
             X_tr.copy(),
-            data["Real"][1],
+            data["Real"][1].copy(),
             syn_y.iloc[train].copy(),
-            data["Real"][3],
+            data["Real"][3].copy(),
         ]
 
         # get fidelity
@@ -205,7 +210,7 @@ def exec__(
 
 
 if __name__ == "__main__":
-    datasets = ["adult"]
+    datasets = ["credit"]
     sd_models = ["copula"]  # , "vae", "gan"]
     sd_model_args = {}
     proj_model_args = {"epochs": 300, "batch_size": 512}
