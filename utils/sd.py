@@ -14,6 +14,21 @@ from keras import layers
 # includes scripts for generating synthetic data (regular or projections)
 
 
+def inverse_leaky_relu(x):
+    if x >= 0:
+        return x
+    else:
+        return x / 0.01
+
+
+def inverse_sigmoid(x):
+    return keras.ops.log(x / (1 - x))
+
+
+def inverse_pass(x):
+    return x
+
+
 def sdv_generate(
     X: pd.DataFrame,
     y: pd.Series,
@@ -119,13 +134,21 @@ def fit_model(
 
 
 class Encoder(keras.models.Model):
-    def __init__(self, output_dim, input_dim, compression_layers=[], reverse=False):
+    def __init__(
+        self,
+        output_dim,
+        input_dim,
+        compression_layers=[],
+        activation="sigmoid",
+        reverse=False,
+    ):
         super().__init__()
         # init arguments
         self.output_dim = output_dim
         self.input_dim = input_dim
         self.reverse = reverse
         self.compression_layers = compression_layers
+        self.activation = activation
 
         # model building blocks
         self.hidden_layers = []
@@ -135,22 +158,22 @@ class Encoder(keras.models.Model):
             )
 
         if reverse:
-            activation = None
-        else:
-            activation = "sigmoid"
-
-        # reg = keras.regularizers.OrthogonalRegularizer(
-        #     factor=0.1,
-        # )
+            self.activation = None
 
         self.out = layers.Dense(
             self.output_dim,
-            activation=activation,
+            activation=self.activation,
             use_bias=False,
-            # kernel_regularizer=reg,
         )
 
-        self.inverse_sigmoid = layers.Lambda(lambda x: keras.ops.log(x / (1 - x)))
+        if self.activation == "sigmoid":
+            inv_func = inverse_sigmoid
+        elif self.activation == "leaky_relu":
+            inv_func = inverse_leaky_relu
+        else:
+            inv_func = inverse_pass
+
+        self.inverse_activation = layers.Lambda(inv_func)
 
     def build(self, input_shape):
         # Define the shape of the input to the first hidden layer
@@ -171,7 +194,7 @@ class Encoder(keras.models.Model):
         x = inputs
 
         if self.reverse:
-            x = self.inverse_sigmoid(x)
+            x = self.inverse_activation(x)
 
         for layer in self.hidden_layers:
             x = layer(x)
@@ -234,16 +257,27 @@ class Predictor(keras.models.Model):
 
 class EncoderModel(keras.models.Model):
 
-    def __init__(self, latent_dim, input_dim, compression_layers):
-        super().__init__()
+    def __init__(
+        self,
+        latent_dim,
+        input_dim,
+        compression_layers,
+        activation="sigmoid",
+        name="EncoderModel",
+    ):
+        super().__init__(
+            name=name,
+        )
         self.latent_dim = latent_dim
         self.compression_layers = compression_layers
         self.input_dim = input_dim
+        self.activation = activation
 
         self.encoder = Encoder(
             output_dim=self.latent_dim,
             input_dim=self.input_dim,
             compression_layers=self.compression_layers,
+            activation=self.activation,
         )
         self.predictor = Predictor()
 

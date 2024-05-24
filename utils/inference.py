@@ -1,4 +1,4 @@
-from utils import preprocess
+from utils import preprocess, sd
 from scipy.spatial import distance
 import pandas as pd
 import numpy as np
@@ -10,10 +10,13 @@ from sklearn.ensemble import (
     GradientBoostingClassifier,
     GradientBoostingRegressor,
 )
+from sklearn.metrics import roc_auc_score, mean_squared_error
+import keras
 
-# from skopt import BayesSearchCV
-# from skopt.space import Real, Categorical, Integer
+from skopt import BayesSearchCV
+from skopt.space import Real, Categorical, Integer
 from sklearn.model_selection import GridSearchCV
+from xgboost import XGBClassifier, XGBRegressor
 
 
 def utility(
@@ -21,11 +24,16 @@ def utility(
     X_test: pd.DataFrame,
     y_train: pd.Series,
     y_test: pd.Series,
+    models: list,
+    param_spaces: dict,
 ):
     """
-    Finds utility score. Utility score is defined as the prediction performance on a test set.
-    The unit of this score depends on the datatype of the target, i.e. binary, categorical, continuous,
-    and is automatically inferred. Bayesian hyperparameter selection is performed.
+    Finds utility score (prediction task) for a list of models and parameter spaces.
+    For keras models these are training arguments (epochs and batch size). For sklearn these are tunable hyperparameters, which are tuned through CV.
+
+
+    Utility score is defined as the prediction performance on a test set.
+    The unit of this score depends on the datatype of the target, i.e. binary, categorical, continuous, and is automatically inferred.
     returns: lists of best models and corresponding best scores.
 
     """
@@ -33,28 +41,68 @@ def utility(
     # infer datatype of target
     dt = preprocess.infer_data_type(y_train)
     assert dt in ["binary", "multiclass", "continuous"]
-
-    models, param_search_spaces, scoring = get_pred_models_(dt=dt)
+    # create numeric labels if not numeric
+    if not pd.api.types.is_numeric_dtype(y_train):
+        y_train, y_test = y_train.copy(), y_test.copy()
+        for y in [y_train, y_test]:
+            y, _ = pd.factorize(y)
 
     output = {}
-    # for the different types of models, find the best hyperparameters and return score on a test set
-    for model, param_space in zip(models, param_search_spaces):
-        best_model, best_score = get_best_model_(
-            X_train=X_train,
-            X_test=X_test,
-            y_train=y_train,
-            y_test=y_test,
-            model=model,
-            param_space=param_space,
-            scoring=scoring,
-        )
-        output[best_model.__class__.__name__] = best_score
+    for model, param_space in zip(models, param_spaces):
+        if isinstance(model, keras.models.Model):
+            if dt == "binary":
+                score = roc_auc_score
+                kwargs = {}
+                loss = "binary_crossentropy"
+                metric = "AUC"
+            elif dt == "multi_class":
+                score = roc_auc_score
+                kwargs = {"multi_class": "ovr", "average": "macro"}
+                loss = "categorical_crossentropy"
+                metric = "accuracy"
+            elif dt == "continuous":
+                score = mean_squared_error
+                kwargs = {"squared": False}
+                loss = "mean_squared_error"
+                metric = "mean_squared_error"
+
+            model.compile(optimizer="adam", loss=loss, metrics=[metric])
+            sd.fit_model(
+                model=model,
+                X=X_train,
+                y=y_train,
+                model_args=param_space,
+                monitor="val_" + metric,
+            )
+            preds = model.predict(X_test)
+            output[str(model)] = score(y_test, preds, **kwargs)
+        else:
+            if dt == "binary":
+                score = "roc_auc"
+            elif dt == "multiclass":
+                score = "roc_auc_ovr"
+            elif dt == "continuous":
+                score = "neg_root_mean_squared_error"
+            best_model, best_score = get_best_model_(
+                X_train=X_train,
+                X_test=X_test,
+                y_train=y_train,
+                y_test=y_test,
+                model=model,
+                param_space=param_space,
+                scoring=score,
+            )
+            output[str(best_model)] = best_score
 
     return output
 
 
 def attribute_inference(
-    real_data: pd.DataFrame, synthetic_data: pd.DataFrame, sensitive_field: str
+    real_data: pd.DataFrame,
+    synthetic_data: pd.DataFrame,
+    sensitive_field: str,
+    models: list,
+    param_spaces: list,
 ):
     """
     Perform an attribute inference attack using synthetic data, by training an inference model on synthetic data and inferring on a real test set.
@@ -71,6 +119,8 @@ def attribute_inference(
         X_test=real_data[key_fields],
         y_train=synthetic_data[sensitive_field],
         y_test=real_data[sensitive_field],
+        models=models,
+        param_spaces=param_spaces,
     )
     return output
 
@@ -257,126 +307,72 @@ def get_column_plots_(
         )
     full_df = pd.concat(full_df)
 
+    # cast categoricals as strings (so all non numericals) to ensure binaries also get plotted as category
+    cats = [
+        x for x in full_df.columns if x not in (config["num_features"] + ["dataset"])
+    ]
+    full_df[cats] = full_df[cats].astype(str)
+    # put ordering as numericals first and categoricals later for nice aesthetic
+    full_df = full_df[config["num_features"] + cats + ["dataset"]]
+
     plot = plot_dataframe(df=full_df, ncols=2, rotate_labels=True)
 
     return plot
 
 
 def get_binary_models_():
-    models = [
-        LogisticRegression(solver="saga", penalty="l2"),
-        # LogisticRegression(solver="liblinear"),
-        GradientBoostingClassifier(),
-        # RandomForestClassifier(n_jobs=-1),
-    ]
-
-    # param_search_spaces = [
-    #     {
-    #         "C": Real(1e-3, 1e3),
-    #     },  # LR
-    #     # {"penalty": Categorical(["l2", "l1"]), "C": Real(1e-3, 1e6)},
-    #     {
-    #         "n_estimators": Integer(1e0, 1e2),
-    #         "max_depth": Integer(1, 10),
-    #     },  # GB
-    #     # {
-    #     #     "n_estimators": Integer(1e0, 1e3),
-    #     #     "max_depth": Integer(1, 25),
-    #     # },  # RF
-    # ]
+    models = [LogisticRegression(solver="saga", penalty="l2"), XGBClassifier(n_jobs=1)]
 
     param_search_spaces = [
         {
-            "C": np.logspace(-3, 3, 7),
+            "C": Real(1e-3, 1e3),
         },  # LR
-        # {"penalty": Categorical(["l2", "l1"]), "C": Real(1e-3, 1e6)},
         {
-            "n_estimators": [10, 50, 100],
-            "max_depth": [1, 5, 10],
+            "n_estimators": Integer(1, 300),
+            "max_depth": Integer(1, 10),
+            "subsample": Real(0.5, 1),
+            "lambda": Real(1, 100),
         },  # GB
-        # {
-        #     "n_estimators": Integer(1e0, 1e3),
-        #     "max_depth": Integer(1, 25),
-        # },  # RF
     ]
     return models, param_search_spaces
 
 
 def get_multiclass_models_():
-
     models = [
         LogisticRegression(multi_class="multinomial", solver="saga", penalty="l2"),
-        GradientBoostingClassifier(),
-        # RandomForestClassifier(n_jobs=-1),
+        XGBClassifier(n_jobs=1, objective="multi:softmax"),
     ]
-
-    # param_search_spaces = [
-    #     {
-    #         "C": Real(1e-3, 1e3),
-    #     },  # LR
-    #     {
-    #         "n_estimators": Integer(1e0, 1e2),
-    #         "max_depth": Integer(1, 10),
-    #     },  # GB
-    #     # {
-    #     #     "n_estimators": Integer(1e0, 1e3),
-    #     #     "max_depth": Integer(1, 25),
-    #     # },  # RF
-    # ]
 
     param_search_spaces = [
         {
-            "C": np.logspace(-3, 3, 7),
+            "C": Real(1e-3, 1e3),
         },  # LR
-        # {"penalty": Categorical(["l2", "l1"]), "C": Real(1e-3, 1e6)},
         {
-            "n_estimators": [10, 50, 100],
-            "max_depth": [1, 5, 10],
+            "n_estimators": Integer(1, 300),
+            "max_depth": Integer(1, 10),
+            "subsample": Real(0.5, 1),
+            "lambda": Real(1, 100),
         },  # GB
-        # {
-        #     "n_estimators": Integer(1e0, 1e3),
-        #     "max_depth": Integer(1, 25),
-        # },  # RF
     ]
 
     return models, param_search_spaces
 
 
 def get_regression_models_():
-    models = [
-        Ridge(solver="saga"),
-        GradientBoostingRegressor(),
-        # RandomForestRegressor(n_jobs=-1),
-    ]
-    # param_search_spaces = [
-    #     {
-    #         "alpha": Real(1e-3, 1e3),
-    #     },
-    #     {
-    #         "n_estimators": Integer(1e0, 1e2),
-    #         "max_depth": Integer(1, 10),
-    #     },  # GB
-    #     # {
-    #     #     "n_estimators": Integer(1e0, 1e3),
-    #     #     "max_depth": Integer(1, 25),
-    #     # },  # RF
-    # ]
+
+    models = [Ridge(solver="saga"), XGBRegressor(n_jobs=1)]
 
     param_search_spaces = [
         {
-            "alpha": np.logspace(-3, 3, 7),
+            "alpha": Real(1e-3, 1e3),
         },  # LR
-        # {"penalty": Categorical(["l2", "l1"]), "C": Real(1e-3, 1e6)},
         {
-            "n_estimators": [10, 50, 100],
-            "max_depth": [1, 5, 10],
+            "n_estimators": Integer(1, 300),
+            "max_depth": Integer(1, 10),
+            "subsample": Real(0.5, 1),
+            "lambda": Real(1, 100),
         },  # GB
-        # {
-        #     "n_estimators": Integer(1e0, 1e3),
-        #     "max_depth": Integer(1, 25),
-        # },  # RF
     ]
-
     return models, param_search_spaces
 
 
@@ -411,41 +407,69 @@ def get_best_model_(
     n_points = 3
     n_jobs = int(n_points * cv)
 
-    # opt = BayesSearchCV(
-    #     model,
-    #     param_space,
-    #     n_iter=n_iter,
-    #     cv=cv,
-    #     scoring=scoring,
-    #     random_state=0,
-    #     verbose=0,
-    #     n_jobs=n_jobs,
-    #     n_points=n_points,
-    # )
-
-    opt = GridSearchCV(
+    opt = BayesSearchCV(
         model,
         param_space,
+        n_iter=n_iter,
         cv=cv,
         scoring=scoring,
+        random_state=0,
         verbose=0,
-        n_jobs=-1,
+        n_jobs=n_jobs,
+        n_points=n_points,
     )
+
+    # opt = GridSearchCV(
+    #     model,
+    #     param_space,
+    #     cv=cv,
+    #     scoring=scoring,
+    #     verbose=0,
+    #     n_jobs=-1,
+    # )
 
     opt.fit(X_train, y_train)
     return opt.best_estimator_, opt.score(X_test, y_test)
 
 
-def get_utility_(data: dict):
+def get_utility_(
+    data: dict, encoder: bool = False, encoder_args: dict = {}, sklearn: bool = False
+):
     """
-    Retrieves utility scores for a dictionary of datasets and formats output. Dictionary of datasets is in the format:
-    key:[X_train,X_test,y_train,y_test]. See utility() function for what utility score means.
+    Retrieves utility scores for a dictionary of datasets.
+
+    Will use encoder model and/or sklearn models if specified.
+
+    Dictionary of datasets is in the format name:[X_train,X_test,y_train,y_test].
+    See utility() function for what utility score means.
     """
     output = {}
     for name, (X_tr, X_te, y_tr, y_te) in data.items():
-        # set dictionary for specific dataset with dictionary of model:testscore
-        output[name] = utility(X_tr, X_te, y_tr, y_te)
+        models = []
+        param_search_spaces = []
+        dt = preprocess.infer_data_type(y_tr)
+        if sklearn:
+            sklearn_models, sklearn_param_search_spaces, scoring = get_pred_models_(
+                dt=dt
+            )
+            models.extend(sklearn_models)
+            param_search_spaces.extend(sklearn_param_search_spaces)
+        if encoder:
+            models.append(
+                sd.EncoderModel(
+                    latent_dim=X_tr.shape[1],
+                    input_dim=X_tr.shape[1],
+                    compression_layers=[],
+                )
+            )
+            param_search_spaces.append(encoder_args)
+
+        output[name] = utility(
+            X_tr, X_te, y_tr, y_te, models=models, param_spaces=param_search_spaces
+        )
+
     output = pd.DataFrame(output)
+
     return output
 
 
@@ -462,15 +486,22 @@ def get_attribute_inference_(
     """
     output = {}
     sensitive_fields = config["sensitive_fields"]
-    for name, (X_tr, X_te, y_tr, y_te) in data.items():
+
+    for name, (X_tr, _, _, _) in data.items():
         if name in sd_sets:
             att = {}
             for sensitive_field in sensitive_fields:
-                # decode sensitive target to single feature if one hot encoded
-
                 rd = data[real_key][0].copy()
                 sd = X_tr.copy()
-                if sensitive_field in config["cat_features"]:
+
+                if sensitive_field in config["bin_features"]:
+                    # remove suffix for binary features
+                    for col in sd.columns:
+                        if col.split("_")[0] == sensitive_field:
+                            sd = sd.rename({col: sensitive_field}, axis=1)
+                            rd = rd.rename({col: sensitive_field}, axis=1)
+                elif sensitive_field in config["cat_features"]:
+                    # collapse to single feature for categorical non binary features
                     rd = preprocess.collapse_onehot(
                         df=rd, categorical_features=[sensitive_field]
                     )
@@ -478,15 +509,20 @@ def get_attribute_inference_(
                         df=sd, categorical_features=[sensitive_field]
                     )
 
-                atr = attribute_inference(
+                # retrieve prediction models and parameter spaces
+                dt = preprocess.infer_data_type(rd[sensitive_field])
+                models, param_spaces, scoring = get_pred_models_(dt=dt)
+                # perform attribute inference
+                att[sensitive_field] = attribute_inference(
                     real_data=rd,
                     synthetic_data=sd,
                     sensitive_field=sensitive_field,
+                    models=models,
+                    param_spaces=param_spaces,
                 )
-                att[sensitive_field] = atr
             output[name] = att
 
-    # flatten the three-layer dictionary
+    # flatten the three-layer dictionary (dataset,feature,model)
     output = {key: preprocess.flatten_dict(value) for key, value in output.items()}
     output = pd.DataFrame(output)
     return output

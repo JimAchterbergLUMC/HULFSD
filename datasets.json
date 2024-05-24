@@ -1,4 +1,13 @@
 {
+    "bank": {
+        "name": "bank",
+        "id": 222,
+        "cat_features": ["job","marital","education","default","housing","loan","poutcome"],
+        "bin_features": ["default","housing","loan"],
+        "num_features": ["age","balance","campaign","previous"],
+        "drop_features": ["duration"],
+        "sensitive_fields": []
+    },
     "adult": {
         "name": "adult",
         "id": 2,
@@ -10,6 +19,9 @@
             "relationship",
             "race",
             "native-country"
+        ],
+        "bin_features": [
+            "sex"
         ],
         "num_features": [
             "age",
@@ -28,12 +40,6 @@
             "race"
         ]
     },
-    "bank": {
-        "id": 222,
-        "cat_features": [],
-        "num_features": [],
-        "drop_features": []
-    },
     "credit": {
         "name": "credit",
         "id": 350,
@@ -47,6 +53,9 @@
             "X9",
             "X10",
             "X11"
+        ],
+        "bin_features": [
+            "X2"
         ],
         "num_features": [
             "X1",
@@ -70,10 +79,55 @@
             "X2"
         ]
     },
-    "shopping": {
-        "id": 468,
-        "cat_features": [],
-        "num_features": [],
-        "drop_features": []
+    "diabetes": {
+        "name": "diabetes",
+        "id": 891,
+        "cat_features": [
+            "HighBP",
+            "HighChol",
+            "CholCheck",
+            "Smoker",
+            "Stroke",
+            "HeartDiseaseorAttack",
+            "PhysActivity",
+            "Fruits",
+            "Veggies",
+            "HvyAlcoholConsump",
+            "AnyHealthcare",
+            "NoDocbcCost",
+            "DiffWalk",
+            "Sex",
+            "Age"
+        ],
+        "bin_features": [
+            "HighBP",
+            "HighChol",
+            "CholCheck",
+            "Smoker",
+            "Stroke",
+            "HeartDiseaseorAttack",
+            "PhysActivity",
+            "Fruits",
+            "Veggies",
+            "HvyAlcoholConsump",
+            "AnyHealthcare",
+            "NoDocbcCost",
+            "DiffWalk",
+            "Sex"
+        ],
+        "num_features": [
+            "BMI",
+            "GenHlth",
+            "MentHlth",
+            "PhysHlth",
+            "Education",
+            "Income"
+        ],
+        "drop_features": [],
+        "sensitive_fields": [
+            "BMI",
+            "Sex",
+            "Age"
+        ]
     }
 }

@@ -15,7 +15,7 @@ def exec__(
     synthetic data generating model from the Synthetic Data Vault.
 
     """
-    assert ds in ["adult", "bank", "credit", "shopping"]
+    assert ds in ["adult", "credit", "diabetes"]
     assert sd_model in ["copula", "gan", "vae"]
     print(f"Working on dataset: {ds} and synthetic data model: {sd_model}")
     random_state = 999  # for reproducible random data splitting
@@ -60,7 +60,9 @@ def exec__(
         ]
 
         # regular synthetic: train model, then one hot encode (together with real data) and normalize (separately)
-        print(f"generating regular synthetic for fold {fold} for sd model {sd_model}")
+        print(
+            f"generating regular synthetic for fold {fold} for sd model {sd_model} for dataset {ds}"
+        )
         syn_X, syn_y = sd.sdv_generate(
             X=X.iloc[train],
             y=y.iloc[train],
@@ -70,10 +72,10 @@ def exec__(
         )
         syn_X = preprocess.sklearn_preprocessor(
             processor="one-hot",
-            data=pd.concat([syn_X, X]),
+            data=pd.concat([X, syn_X], ignore_index=True),
             features=config["cat_features"],
         )
-        syn_X = syn_X[: X.shape[0]]
+        syn_X = syn_X[-X.shape[0] :]
         X_tr = preprocess.sklearn_preprocessor(
             processor="normalize",
             data=syn_X.iloc[train],
@@ -91,18 +93,16 @@ def exec__(
             data["Real"][3].copy(),
         ]
 
-        # issue is: some features are in synthetic train, but not in real test!
-        # issue is: these features do not exist in one hot encoded real data
-        # and also not in the original data! so these should not exist in the synthetic data
-        # i think the issue is that SDV is recognizing as integer not categorical value, so we need to cast cast cast!
-
         # synthetic decoded projections: instantiate, compile, train, get encoder, project, generate synthetic, split, flip, decode synthetic, normalize and cast to categoricals
         print(
-            f"generating synthetic decoded data for fold {fold} for sd model {sd_model}"
+            f"generating synthetic decoded data for fold {fold} for sd model {sd_model} for dataset {ds}"
         )
         latent_dim = data["Real"][0].shape[1]
         proj_model = sd.EncoderModel(
-            latent_dim=latent_dim, input_dim=latent_dim, compression_layers=[]
+            latent_dim=latent_dim,
+            input_dim=latent_dim,
+            compression_layers=[],
+            activation="sigmoid",
         )
         proj_model.compile(
             optimizer="adam",
@@ -151,14 +151,17 @@ def exec__(
         ]
 
         # get fidelity
-        print(f"getting fidelity for fold: {fold} for sd model: {sd_model}")
-        fid_tsne = inference.get_projection_plot_(
-            real=data["Real Projected"][0],
-            synthetic=data["Synthetic Projected"][0],
-            type="tsne",
-            n_neighbours=35,
+        print(
+            f"getting fidelity for fold: {fold} for sd model: {sd_model} for dataset {ds}"
         )
-        fid_tsne.savefig(os.path.join(result_path, f"tsne_plot_{fold}.png"))
+        if fold in [0, 4, 9]:
+            fid_tsne = inference.get_projection_plot_(
+                real=data["Real Projected"][0],
+                synthetic=data["Synthetic Projected"][0],
+                type="tsne",
+                n_neighbours=35,
+            )
+            fid_tsne.savefig(os.path.join(result_path, f"tsne_plot_{fold}.png"))
 
         # remove projections data, no longer required
         data.pop("Real Projected")
@@ -171,13 +174,21 @@ def exec__(
         fid_plots.savefig(os.path.join(result_path, f"fidelity_plot_{fold}.png"))
 
         # get utility, aia, authenticity for current fold
-        print(f"getting utility for fold: {fold} and sd model: {sd_model}")
-        utility = inference.get_utility_(data=data)
+        print(
+            f"getting utility for fold: {fold} and sd model: {sd_model} for dataset {ds}"
+        )
+        # get utility for either/both encoder/sklearn models
+        utility = inference.get_utility_(
+            data=data, encoder=False, encoder_args=proj_model_args, sklearn=True
+        )
         print(f"getting AIA for fold: {fold} and sd model: {sd_model}")
+        # attribute inference will search for a good tabular model through cross-validation
         aia = inference.get_attribute_inference_(
             data=data, config=config, sd_sets=["Regular Synthetic", "Synthetic Decoded"]
         )
-        print(f"getting authenticity for fold: {fold} and sd model: {sd_model}")
+        print(
+            f"getting authenticity for fold: {fold} and sd model: {sd_model} for dataset {ds}"
+        )
         auth = inference.get_authenticity_(
             data=data, sd_sets=["Regular Synthetic", "Synthetic Decoded"]
         )
@@ -210,8 +221,10 @@ def exec__(
 
 
 if __name__ == "__main__":
-    datasets = ["credit"]
-    sd_models = ["copula"]  # , "vae", "gan"]
+    datasets = [
+        "adult",
+    ]
+    sd_models = ["copula", "vae"]  # , "gan"]
     sd_model_args = {}
     proj_model_args = {"epochs": 300, "batch_size": 512}
 
@@ -225,14 +238,3 @@ if __name__ == "__main__":
                 proj_model_args=proj_model_args,
                 n_splits=10,
             )
-        # Parallel(
-        #     n_jobs=-1,
-        # )(
-        #     delayed(exec__)(
-        #         sd_model=sd_model,
-        #         ds=ds,
-        #         sd_model_args=sd_model_args,
-        #         proj_model_args=proj_model_args,
-        #     )
-        #     for sd_model in sd_models
-        # )

@@ -21,6 +21,34 @@ def preprocess(X, y, config):
         X, y = preprocess_adult(X=X, y=y)
     elif config["name"] == "credit":
         X, y = preprocess_credit(X=X, y=y)
+    elif config["name"] == "diabetes":
+        X, y = preprocess_diabetes(X=X, y=y)
+
+    return X, y
+
+
+def preprocess_diabetes(X, y):
+    if isinstance(y, pd.DataFrame):
+        y = y.Diabetes_binary
+    y = y.copy()
+
+    # # encode age to only 4 categories:
+    def encode_age(value):
+        value = int(value)
+        if value <= 5:
+            # under 45
+            return 1
+        elif value <= 8:
+            # under 60
+            return 2
+        elif value <= 11:
+            # under 75
+            return 3
+        else:
+            # above 75
+            return 4
+
+    X.loc[:, "Age"] = X["Age"].apply(encode_age)
 
     return X, y
 
@@ -31,7 +59,7 @@ def sklearn_preprocessor(processor: str, data: pd.DataFrame, features: list):
     """
     assert processor in ["one-hot", "normalize"]
     if processor == "one-hot":
-        processor = OneHotEncoder(drop=None)
+        processor = OneHotEncoder(drop="if_binary")
     elif processor == "normalize":
         processor = MinMaxScaler((0, 1))
 
@@ -45,6 +73,7 @@ def sklearn_preprocessor(processor: str, data: pd.DataFrame, features: list):
         df = df.toarray()
     # get transformed data in dataframe with correct feature names
     df = pd.DataFrame(df, columns=fitted_processor.get_feature_names_out(features))
+
     # replace features with preprocessed features
     data = data.drop(features, axis=1)
     data = pd.concat([data, df], axis=1)
@@ -90,21 +119,25 @@ def collapse_onehot(df: pd.DataFrame, categorical_features: list):
                 c_.append(column)
             c[cat] = c_
 
-    # remove one hot features and replace with decoded features
+    # remove one hot features and replace with decoded features (except when binary)
     for cat, names in c.items():
+        if len(names) > 1:
+            new = pd.DataFrame(df[names].idxmax(axis=1), columns=[cat])
+            # now all thats left is to remove prefix
+            new = new.map(remove_prefix)
 
-        new = pd.DataFrame(df[names].idxmax(axis=1), columns=[cat])
-        # now all thats left is to remove prefix
-        new = new.map(remove_prefix)
-
-        df = df.drop(names, axis=1)
-        df = pd.concat([df, new], axis=1)
+            df = df.drop(names, axis=1)
+            df = pd.concat([df, new], axis=1)
 
     return df
 
 
 def remove_prefix(s):
     return s.split("_", 1)[1] if "_" in s else s
+
+
+def remove_suffix(s):
+    return s.split("_", 1)[0] if "_" in s else s
 
 
 def postprocess_projections(data, config):
