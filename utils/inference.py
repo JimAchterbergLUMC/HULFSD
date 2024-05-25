@@ -10,13 +10,14 @@ from sklearn.ensemble import (
     GradientBoostingClassifier,
     GradientBoostingRegressor,
 )
-from sklearn.metrics import roc_auc_score, mean_squared_error
+from sklearn.metrics import roc_auc_score, mean_squared_error, f1_score, make_scorer
 import keras
 
 from skopt import BayesSearchCV
 from skopt.space import Real, Categorical, Integer
 from sklearn.model_selection import GridSearchCV
 from xgboost import XGBClassifier, XGBRegressor
+from sklearn.preprocessing import label_binarize
 
 
 def utility(
@@ -42,10 +43,11 @@ def utility(
     dt = preprocess.infer_data_type(y_train)
     assert dt in ["binary", "multiclass", "continuous"]
     # create numeric labels if not numeric
+    y_train, y_test = y_train.copy(), y_test.copy()
     if not pd.api.types.is_numeric_dtype(y_train):
-        y_train, y_test = y_train.copy(), y_test.copy()
-        for y in [y_train, y_test]:
-            y, _ = pd.factorize(y)
+        y_train, _ = pd.factorize(y_train)
+    if not pd.api.types.is_numeric_dtype(y_test):
+        y_test, _ = pd.factorize(y_test)
 
     output = {}
     for model, param_space in zip(models, param_spaces):
@@ -57,7 +59,7 @@ def utility(
                 metric = "AUC"
             elif dt == "multi_class":
                 score = roc_auc_score
-                kwargs = {"multi_class": "ovr", "average": "macro"}
+                kwargs = {"multi_class": "ovr", "average": "weighted"}
                 loss = "categorical_crossentropy"
                 metric = "accuracy"
             elif dt == "continuous":
@@ -80,7 +82,7 @@ def utility(
             if dt == "binary":
                 score = "roc_auc"
             elif dt == "multiclass":
-                score = "roc_auc_ovr"
+                score = make_scorer(multiclass_roc_auc, needs_proba=True)
             elif dt == "continuous":
                 score = "neg_root_mean_squared_error"
             best_model, best_score = get_best_model_(
@@ -92,9 +94,33 @@ def utility(
                 param_space=param_space,
                 scoring=score,
             )
-            output[str(best_model)] = best_score
+            output[str(best_model)[:3]] = best_score
 
     return output
+
+
+def multiclass_roc_auc(y_true, y_score, multi_class="ovr", average="weighted"):
+    """
+    multiclass ROCAUC of sklearn cannot handle when some classes are not predicted.
+    With this function we first binarize the true and predicted labels, ensuring they are of the same size.
+    """
+    classes = np.unique(y_true)
+    n_classes = len(classes)
+
+    # Ensure y_score has the correct shape
+    if y_score.shape[1] != n_classes:
+        y_score_adjusted = np.zeros((y_score.shape[0], n_classes))
+        for i, cls in enumerate(classes):
+            if cls < y_score.shape[1]:
+                y_score_adjusted[:, cls] = y_score[:, cls]
+    else:
+        y_score_adjusted = y_score
+
+    # Binarize y_true for multiclass roc_auc_score
+    y_true_binarized = label_binarize(y_true, classes=classes)
+    return roc_auc_score(
+        y_true_binarized, y_score_adjusted, multi_class=multi_class, average=average
+    )
 
 
 def attribute_inference(
@@ -381,16 +407,12 @@ def get_pred_models_(dt):
     # get list of models
     if dt == "binary":
         models, param_search_spaces = get_binary_models_()
-        scoring = "roc_auc"
     elif dt == "multiclass":
         models, param_search_spaces = get_multiclass_models_()
-        # scoring = make_scorer(matthews_corrcoef)
-        scoring = "roc_auc_ovr"
     elif dt == "continuous":
         models, param_search_spaces = get_regression_models_()
-        scoring = "neg_root_mean_squared_error"
 
-    return models, param_search_spaces, scoring
+    return models, param_search_spaces
 
 
 def get_best_model_(
@@ -449,9 +471,7 @@ def get_utility_(
         param_search_spaces = []
         dt = preprocess.infer_data_type(y_tr)
         if sklearn:
-            sklearn_models, sklearn_param_search_spaces, scoring = get_pred_models_(
-                dt=dt
-            )
+            sklearn_models, sklearn_param_search_spaces = get_pred_models_(dt=dt)
             models.extend(sklearn_models)
             param_search_spaces.extend(sklearn_param_search_spaces)
         if encoder:
@@ -511,7 +531,7 @@ def get_attribute_inference_(
 
                 # retrieve prediction models and parameter spaces
                 dt = preprocess.infer_data_type(rd[sensitive_field])
-                models, param_spaces, scoring = get_pred_models_(dt=dt)
+                models, param_spaces = get_pred_models_(dt=dt)
                 # perform attribute inference
                 att[sensitive_field] = attribute_inference(
                     real_data=rd,

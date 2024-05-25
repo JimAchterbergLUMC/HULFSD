@@ -2,10 +2,29 @@
     "bank": {
         "name": "bank",
         "id": 222,
-        "cat_features": ["job","marital","education","default","housing","loan","poutcome"],
-        "bin_features": ["default","housing","loan"],
-        "num_features": ["age","balance","campaign","previous"],
-        "drop_features": ["duration"],
+        "cat_features": [
+            "job",
+            "marital",
+            "education",
+            "default",
+            "housing",
+            "loan",
+            "poutcome"
+        ],
+        "bin_features": [
+            "default",
+            "housing",
+            "loan"
+        ],
+        "num_features": [
+            "age",
+            "balance",
+            "campaign",
+            "previous"
+        ],
+        "drop_features": [
+            "duration"
+        ],
         "sensitive_fields": []
     },
     "adult": {

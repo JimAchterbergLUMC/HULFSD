@@ -226,7 +226,7 @@ if __name__ == "__main__":
     ]
     sd_models = ["copula", "vae"]  # , "gan"]
     sd_model_args = {}
-    proj_model_args = {"epochs": 300, "batch_size": 512}
+    proj_model_args = {"epochs": 100, "batch_size": 512}
 
     # get results
     for ds in datasets:
