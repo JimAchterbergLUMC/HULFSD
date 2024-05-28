@@ -119,11 +119,10 @@ def collapse_onehot(df: pd.DataFrame, categorical_features: list):
                 c_.append(column)
             c[cat] = c_
 
-    # remove one hot features and replace with decoded features (except when binary)
+    # remove one hot features and replace with collapsed features
     for cat, names in c.items():
         if len(names) > 1:
             new = pd.DataFrame(df[names].idxmax(axis=1), columns=[cat])
-            # now all thats left is to remove prefix
             new = new.map(remove_prefix)
 
             df = df.drop(names, axis=1)
@@ -140,19 +139,19 @@ def remove_suffix(s):
     return s.split("_", 1)[0] if "_" in s else s
 
 
-def postprocess_projections(data, config):
+def postprocess_projections(data, config, normalize=True):
     """
     Postprocess projections such that categories are integers instead of continuous.
     Multiclass features get the highest column as feature instance, binary columns are rounded.
     """
     # [0,1] scale all data, then use a threshold for categoricals
     data = data.copy()
-
-    data = sklearn_preprocessor(
-        processor="normalize",
-        data=data,
-        features=data.columns,
-    )
+    if normalize:
+        data = sklearn_preprocessor(
+            processor="normalize",
+            data=data,
+            features=data.columns,
+        )
 
     # store list of preprocessed names per categorical feature in a dictionary
     cat_features = config["cat_features"]

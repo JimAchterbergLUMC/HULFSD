@@ -96,12 +96,20 @@ def fit_model(
     model: keras.models.Model,
     X: pd.DataFrame,
     y: pd.Series,
+    loss: str,
     model_args: dict,
-    monitor: str = "val_AUC",
+    metric: str,
 ):
     """
     Takes a keras model and fits it with checkpointing to retrieve the best generalizing model seen during training.
     """
+
+    # first compile the model
+    model.compile(
+        optimizer=keras.optimizers.Adam(learning_rate=0.001),
+        loss=loss,
+        metrics=[metric],
+    )
 
     # setup model checkpointing
     model_path = "models"
@@ -110,19 +118,12 @@ def fit_model(
     checkpoint_filepath = os.path.join(model_path, f"{model.name}.weights.h5")
     checkpoint_callback = keras.callbacks.ModelCheckpoint(
         filepath=checkpoint_filepath,
-        monitor=monitor,
+        monitor="val_" + metric,
         save_best_only=True,
         save_weights_only=True,
     )
 
-    model.fit(
-        X,
-        y,
-        batch_size=model_args["batch_size"],
-        epochs=model_args["epochs"],
-        validation_split=0.3,
-        callbacks=[checkpoint_callback],
-    )
+    model.fit(X, y, validation_split=0.3, callbacks=[checkpoint_callback], **model_args)
 
     model.load_weights(checkpoint_filepath)
 
@@ -285,6 +286,17 @@ class EncoderModel(keras.models.Model):
         proj = self.encoder(inputs)
         pred = self.predictor(proj)
         return pred
+
+
+class Decoder(keras.models.Model):
+
+    def __init__(self, output_dim):
+        super().__init__()
+        # self.dense = layers.Dense(units=output_dim)
+        self.out = layers.Dense(units=output_dim, activation="sigmoid")
+
+    def call(self, inputs):
+        return self.out(inputs)
 
 
 class Keras_binary_MCC(keras.metrics.Metric):

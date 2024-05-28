@@ -30,7 +30,8 @@ def utility(
 ):
     """
     Finds utility score (prediction task) for a list of models and parameter spaces.
-    For keras models these are training arguments (epochs and batch size). For sklearn these are tunable hyperparameters, which are tuned through CV.
+    For keras models these are training arguments (epochs and batch size). For sklearn these are tunable hyperparameters,
+    which are tuned internally through CV.
 
 
     Utility score is defined as the prediction performance on a test set.

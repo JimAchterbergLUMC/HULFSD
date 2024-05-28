@@ -18,7 +18,7 @@ def exec__(
     assert ds in ["adult", "credit", "diabetes"]
     assert sd_model in ["copula", "gan", "vae"]
     print(f"Working on dataset: {ds} and synthetic data model: {sd_model}")
-    random_state = 999  # for reproducible random data splitting
+    random_state = 123  # for reproducible random data splitting
 
     result_path = os.path.join("results", ds, sd_model)
     if not os.path.exists(result_path):
@@ -81,11 +81,6 @@ def exec__(
             data=syn_X.iloc[train],
             features=config["num_features"],
         )
-        X_te = preprocess.sklearn_preprocessor(
-            processor="normalize",
-            data=syn_X.iloc[test],
-            features=config["num_features"],
-        )
         data["Regular Synthetic"] = [
             X_tr.copy(),
             data["Real"][1].copy(),
@@ -102,19 +97,16 @@ def exec__(
             latent_dim=latent_dim,
             input_dim=latent_dim,
             compression_layers=[],
-            activation="sigmoid",
+            activation="linear",
         )
-        proj_model.compile(
-            optimizer="adam",
-            loss="binary_crossentropy",
-            metrics=["AUC"],
-        )
+
         sd.fit_model(
             model=proj_model,
             X=data["Real"][0],
             y=data["Real"][2],
+            loss="binary_crossentropy",
+            metric="accuracy",
             model_args=proj_model_args,
-            monitor="val_AUC",
         )
         encoder, predictor = proj_model.encoder, proj_model.predictor
         X_tr = pd.DataFrame(
@@ -125,24 +117,44 @@ def exec__(
             encoder.predict(data["Real"][1]),
             columns=["column_" + str(x) for x in list(range(latent_dim))],
         )
+        # either we generate synthetic y train with SDV or from projections...
+        # probably should do it from projections to ensure retaining correlations as learned by the model
+        # since we are using 0.5 as threshold, we should use accuracy as validation metric
         data["Real Projected"] = [X_tr, X_te]
-        syn_X, syn_y = sd.sdv_generate(
+        syn_X, _ = sd.sdv_generate(
             X=X_tr,
-            y=data["Real"][2],
+            y=pd.Series(0, index=list(range(X_tr.shape[0])), name="y"),
+            # y=data["Real"][2],
             sample_size=X.shape[0],
             model=sd_model,
             model_args=sd_model_args,
             projected=True,
         )
+        syn_y = pd.DataFrame(
+            predictor.predict(syn_X), columns=[data["Real"][2].name]
+        ).squeeze()
+        syn_y = (syn_y.round()).astype(int)
         data["Synthetic Projected"] = [syn_X.iloc[train], syn_X.iloc[test]]
 
-        decoder = encoder.flip()
+        decoder = sd.Decoder(output_dim=latent_dim)
+        sd.fit_model(
+            model=decoder,
+            X=data["Real Projected"][0],
+            y=data["Real"][0],
+            loss="mean_squared_error",
+            metric="mean_absolute_error",
+            model_args=proj_model_args,
+        )
+
+        # decoder = encoder.flip()
         X_tr = pd.DataFrame(
             decoder.predict(syn_X.iloc[train]), columns=data["Real"][0].columns
         )
+        # normalize, get multiclass categories, round binaries.
+        X_tr = preprocess.postprocess_projections(
+            data=X_tr, config=config, normalize=False
+        )
 
-        # instead of postprocess, maybe just: normalize numericals, collapse categoricals, then one hot encode categoricals again
-        X_tr = preprocess.postprocess_projections(data=X_tr, config=config)
         data["Synthetic Decoded"] = [
             X_tr.copy(),
             data["Real"][1].copy(),
@@ -154,7 +166,7 @@ def exec__(
         print(
             f"getting fidelity for fold: {fold} for sd model: {sd_model} for dataset {ds}"
         )
-        if fold in [0, 4, 9]:
+        if fold in [3, 4, 9]:
             fid_tsne = inference.get_projection_plot_(
                 real=data["Real Projected"][0],
                 synthetic=data["Synthetic Projected"][0],
@@ -221,12 +233,10 @@ def exec__(
 
 
 if __name__ == "__main__":
-    datasets = [
-        "adult",
-    ]
-    sd_models = ["copula", "vae"]  # , "gan"]
+    datasets = ["adult"]
+    sd_models = ["vae"]  # , "gan"]
     sd_model_args = {}
-    proj_model_args = {"epochs": 100, "batch_size": 512}
+    proj_model_args = {"epochs": 300, "batch_size": 512}
 
     # get results
     for ds in datasets:
