@@ -92,10 +92,10 @@ def exec__(
         print(
             f"generating synthetic decoded data for fold {fold} for sd model {sd_model} for dataset {ds}"
         )
-        latent_dim = data["Real"][0].shape[1]
+        latent_dim = int(2 * data["Real"][0].shape[1])
         proj_model = sd.EncoderModel(
             latent_dim=latent_dim,
-            input_dim=latent_dim,
+            input_dim=data["Real"][0].shape[1],
             compression_layers=[],
             activation="linear",
         )
@@ -117,9 +117,6 @@ def exec__(
             encoder.predict(data["Real"][1]),
             columns=["column_" + str(x) for x in list(range(latent_dim))],
         )
-        # either we generate synthetic y train with SDV or from projections...
-        # probably should do it from projections to ensure retaining correlations as learned by the model
-        # since we are using 0.5 as threshold, we should use accuracy as validation metric
         data["Real Projected"] = [X_tr, X_te]
         syn_X, _ = sd.sdv_generate(
             X=X_tr,
@@ -136,7 +133,7 @@ def exec__(
         syn_y = (syn_y.round()).astype(int)
         data["Synthetic Projected"] = [syn_X.iloc[train], syn_X.iloc[test]]
 
-        decoder = sd.Decoder(output_dim=latent_dim)
+        decoder = sd.Decoder(output_dim=data["Real"][0].shape[1])
         sd.fit_model(
             model=decoder,
             X=data["Real Projected"][0],
@@ -166,7 +163,7 @@ def exec__(
         print(
             f"getting fidelity for fold: {fold} for sd model: {sd_model} for dataset {ds}"
         )
-        if fold in [3, 4, 9]:
+        if fold in [0, 4, 9]:
             fid_tsne = inference.get_projection_plot_(
                 real=data["Real Projected"][0],
                 synthetic=data["Synthetic Projected"][0],
@@ -233,8 +230,8 @@ def exec__(
 
 
 if __name__ == "__main__":
-    datasets = ["adult"]
-    sd_models = ["vae"]  # , "gan"]
+    datasets = ["credit"]
+    sd_models = ["vae"]
     sd_model_args = {}
     proj_model_args = {"epochs": 300, "batch_size": 512}
 
