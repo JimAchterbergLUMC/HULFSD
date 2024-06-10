@@ -255,7 +255,7 @@ def get_projection_plot_(
     emb = pd.concat([emb, labels], axis=1)
     emb.columns = ["comp1", "comp2", "labels"]
     plt.figure(figsize=(10, 6))
-    sns.scatterplot(data=emb, x="comp1", y="comp2", hue="labels", alpha=0.1)
+    sns.scatterplot(data=emb, x="comp1", y="comp2", hue="labels", alpha=0.5)
     plt.title(f"tSNE plot ({n_neighbours} perplexity)", fontsize=11)
     legend = plt.legend(fontsize=11)
     for legend_handle in legend.legend_handles:
@@ -430,6 +430,8 @@ def get_best_model_(
     n_points = 3
     n_jobs = int(n_points * cv)
 
+    print(scoring)
+
     opt = BayesSearchCV(
         model,
         param_space,
@@ -569,3 +571,80 @@ def get_authenticity_(data: pd.DataFrame, sd_sets: list = [], real_key: str = "R
             )
     output = pd.DataFrame(output, index=[0])
     return output
+
+
+def spider(df, *, id_column, title=None, max_values=None, padding=1.25):
+    categories = df._get_numeric_data().columns.tolist()
+    data = df[categories].to_dict(orient="list")
+    ids = df[id_column].tolist()
+    if max_values is None:
+        max_values = {key: padding * max(value) for key, value in data.items()}
+
+    normalized_data = {
+        key: np.array(value) / max_values[key] for key, value in data.items()
+    }
+    num_vars = len(data.keys())
+    tiks = list(data.keys())
+    tiks += tiks[:1]
+    angles = np.linspace(0, 2 * np.pi, num_vars, endpoint=False).tolist() + [0]
+    fig, ax = plt.subplots(figsize=(8, 8), subplot_kw=dict(polar=True))
+    for i, model_name in enumerate(ids):
+        values = [normalized_data[key][i] for key in data.keys()]
+        actual_values = [data[key][i] for key in data.keys()]
+        values += values[:1]  # Close the plot for a better look
+        ax.plot(angles, values, label=model_name)
+        ax.fill(angles, values, alpha=0.15)
+        for _x, _y, t in zip(angles, values, actual_values):
+            t = f"{t:.2f}" if isinstance(t, float) else str(t)
+            # ax.text(_x, _y, t, size="xx-small")
+
+        for i, angle in enumerate(angles[:-1]):
+            max_value = max_values[categories[i]]
+            for j in range(1, 6):  # 5 scale indicators
+                scale = j / 5
+                ax.text(
+                    angle,
+                    scale,
+                    f"{scale * max_value:.2f}",
+                    horizontalalignment="center",
+                    size="x-small",
+                    color="grey",
+                )
+
+    ax.fill(angles, np.ones(num_vars + 1), alpha=0.05)
+    ax.set_yticklabels([])
+    ax.set_xticks(angles)
+    ax.set_xticklabels(tiks)
+    ax.legend(loc="upper right", bbox_to_anchor=(0.1, 0.1))
+    if title is not None:
+        plt.suptitle(title)
+    return plt
+
+
+# spider_plot = spider(
+#     pd.DataFrame(
+#         {
+#             "x": [
+#                 "Copula",
+#                 "TVAE",
+#                 "Dec. Copula",
+#                 "Dec. TVAE",
+#             ],
+#             "Utility": [0.805, 0.868, 0.815, 0.875],
+#             "AIA_age": [0.194, 0.163, 0.469, 0.196],
+#             "1/\nAIA_sex": [1 / 0.707, 1 / 0.913, 1 / 0.851, 1 / 0.886],
+#             "1/\nAuthenticity": [1 / 0.100, 1 / 0.288, 1 / 0.051, 1 / 0.195],
+#         }
+#     ),
+#     id_column="x",
+#     max_values={
+#         "Utility": 1,
+#         "AIA_age": 0.5,
+#         "1/\nAIA_sex": 1.5,
+#         "1/\nAuthenticity": 20,
+#     },
+#     title="Adult",
+#     padding=1.1,
+# )
+# spider_plot.savefig("results/adult/spiderplot.png")
+# spider_plot.show()

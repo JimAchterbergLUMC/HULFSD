@@ -15,8 +15,6 @@ def exec__(
     synthetic data generating model from the Synthetic Data Vault.
 
     """
-    assert ds in ["adult", "credit", "diabetes"]
-    assert sd_model in ["copula", "gan", "vae"]
     print(f"Working on dataset: {ds} and synthetic data model: {sd_model}")
     random_state = 123  # for reproducible random data splitting
 
@@ -28,6 +26,7 @@ def exec__(
     with open("datasets.json", "r") as f:
         config = json.load(f)
     config = config[ds]
+
     dataset = fetch_ucirepo(id=config["id"])
     X = dataset.data.features
     y = dataset.data.targets
@@ -230,7 +229,7 @@ def exec__(
 
 
 if __name__ == "__main__":
-    datasets = ["credit"]
+    datasets = ["student"]
     sd_models = ["vae"]
     sd_model_args = {}
     proj_model_args = {"epochs": 300, "batch_size": 512}

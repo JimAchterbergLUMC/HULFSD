@@ -13,42 +13,22 @@ def preprocess(X, y, config):
     # turn numericals into floats
     X[config["num_features"]] = X[config["num_features"]].astype(float)
 
-    # turn categoricals into strings
-    X[config["cat_features"]] = X[config["cat_features"]].astype(str)
-
     # encode
     if config["name"] == "adult":
         X, y = preprocess_adult(X=X, y=y)
     elif config["name"] == "credit":
         X, y = preprocess_credit(X=X, y=y)
-    elif config["name"] == "diabetes":
-        X, y = preprocess_diabetes(X=X, y=y)
+    elif config["name"] == "bank":
+        X, y = preprocess_bank(X=X, y=y)
+    elif config["name"] == "shopping":
+        X, y = preprocess_shopping(X=X, y=y)
+    elif config["name"] == "student":
+        X, y = preprocess_student(X=X, y=y)
+    elif config["name"] == "heart":
+        X, y = preprocess_heart(X=X, y=y)
 
-    return X, y
-
-
-def preprocess_diabetes(X, y):
-    if isinstance(y, pd.DataFrame):
-        y = y.Diabetes_binary
-    y = y.copy()
-
-    # # encode age to only 4 categories:
-    def encode_age(value):
-        value = int(value)
-        if value <= 5:
-            # under 45
-            return 1
-        elif value <= 8:
-            # under 60
-            return 2
-        elif value <= 11:
-            # under 75
-            return 3
-        else:
-            # above 75
-            return 4
-
-    X.loc[:, "Age"] = X["Age"].apply(encode_age)
+    # turn categoricals into strings
+    X[config["cat_features"]] = X[config["cat_features"]].astype(str)
 
     return X, y
 
@@ -187,9 +167,7 @@ def preprocess_adult(X, y):
     Preprocessing specific to Adult census dataset
     """
     # encode target income
-    if isinstance(y, pd.DataFrame):
-        y = y.income
-    y = y.copy()
+    y = y.squeeze()
 
     y = y.replace({"<=50K": 0, "<=50K.": 0, ">50K": 1, ">50K.": 1})
 
@@ -202,11 +180,107 @@ def preprocess_adult(X, y):
 
 
 def preprocess_credit(X, y):
-    y = y.copy()
-    if isinstance(y, pd.DataFrame):
-        y = y.Y
+    y = y.squeeze()
+    return X, y
 
-    # we dont do any encoding
+
+def preprocess_heart(X, y):
+    y = y.astype(int)
+    y = y.squeeze()
+    y = y.apply(lambda x: 1 if x > 0 else 0)
+    return X, y
+
+
+def preprocess_student(X, y):
+    y = y.G3
+    y = y.apply(lambda x: 1 if x < 12 else 0)
+    return X, y
+
+
+def preprocess_shopping(X, y):
+
+    y = y.squeeze()
+    y = y.astype(int)
+
+    # def map_month(row):
+    #     if row in ["Jan", "Feb", "Mar"]:
+    #         return "Q1"
+    #     elif row in ["Apr", "May", "June"]:
+    #         return "Q2"
+    #     elif row in ["Jul", "Aug", "Sep"]:
+    #         return "Q3"
+    #     elif row in ["Oct", "Nov", "Dec"]:
+    #         return "Q4"
+    #     else:
+    #         return "Q?"
+
+    # X.loc[:, "Month"] = X.Month.apply(map_month)
+
+    # def map_opsys(row):
+    #     if int(row) > 4:
+    #         return "Other"
+    #     else:
+    #         return row
+
+    # X.loc[:, "OperatingSystems"] = X.OperatingSystems.apply(map_opsys)
+
+    return X, y
+
+
+def preprocess_bank(X, y):
+    y = y.squeeze()
+    y = y.apply(lambda x: 0 if "no" in x else 1)
+
+    def map_month(row):
+        if row in ["jan", "feb", "mar"]:
+            return "Q1"
+        elif row in ["apr", "may", "jun"]:
+            return "Q2"
+        elif row in ["jul", "aug", "sep"]:
+            return "Q3"
+        elif row in ["oct", "nov", "dec"]:
+            return "Q4"
+
+    X.loc[:, "month"] = X["month"].apply(map_month)
+
+    def map_pdays(row):
+        if row == -1:
+            return "NotContacted"
+        elif row <= 180:
+            return "last6months"
+        elif row <= 360:
+            return "lastYear"
+        else:
+            return "over1year"
+
+    X.loc[:, "pdays"] = X["pdays"].apply(map_pdays)
+
+    return X, y
+
+
+def preprocess_diabetes(X, y):
+    if isinstance(y, pd.DataFrame):
+        y = y.Diabetes_binary
+    y = y.copy()
+
+    # # encode age to only 4 categories:
+    def encode_age(value):
+        value = int(value)
+        if value <= 5:
+            # under 45
+            return 1
+        elif value <= 8:
+            # under 60
+            return 2
+        elif value <= 11:
+            # under 75
+            return 3
+        else:
+            # above 75
+            return 4
+
+    X.loc[:, "Age"] = X["Age"].apply(encode_age)
+
     return X, y
 
 

@@ -9,6 +9,7 @@ from sdv.metadata import SingleTableMetadata
 import os
 import keras
 from keras import layers
+from sklearn.utils.class_weight import compute_class_weight
 
 
 # includes scripts for generating synthetic data (regular or projections)
@@ -104,6 +105,11 @@ def fit_model(
     Takes a keras model and fits it with checkpointing to retrieve the best generalizing model seen during training.
     """
 
+    X = X.copy()
+    y = y.copy()
+    y = y.reset_index(drop=True)
+    X = X.reset_index(drop=True)
+
     # first compile the model
     model.compile(
         optimizer=keras.optimizers.Adam(learning_rate=0.001),
@@ -123,7 +129,13 @@ def fit_model(
         save_weights_only=True,
     )
 
-    model.fit(X, y, validation_split=0.3, callbacks=[checkpoint_callback], **model_args)
+    model.fit(
+        X,
+        y,
+        validation_split=0.3,
+        callbacks=[checkpoint_callback],
+        **model_args,
+    )
 
     model.load_weights(checkpoint_filepath)
 
